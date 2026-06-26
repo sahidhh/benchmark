@@ -3,8 +3,10 @@
 import csv
 import json
 import os
+import shutil
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,12 +18,33 @@ BASE_DIR = Path(__file__).parent
 RESULTS_RAW = BASE_DIR / "results" / "raw"
 RESULTS_CSV = BASE_DIR / "results" / "reports" / "results.csv"
 RESULTS_RESPONSES = BASE_DIR / "results" / "responses"
+TMP_DIR = BASE_DIR / "tmp"
+
+
+@contextmanager
+def workspace(bm_id: str, fixture_path: str):
+    """Copy fixture into tmp/BM-xxxx/, yield the path, delete on exit."""
+    src = BASE_DIR / fixture_path
+    dst = TMP_DIR / bm_id
+    if src.is_dir():
+        shutil.copytree(src, dst)
+    else:
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst / src.name)
+    try:
+        yield dst
+    finally:
+        try:
+            shutil.rmtree(dst)
+        except Exception as e:
+            print(f"Warning: workspace cleanup failed for {dst}: {e}")
+
 
 CSV_FIELDS = [
     "benchmark_id", "timestamp", "model", "profile", "task", "fixture",
     "input_tokens", "output_tokens", "latency_ms", "cost_usd", "finish_reason",
     # manual scoring — fill after run
-    "behavior_compliance", "scope_discipline", "engineering_quality", "cost_efficiency", "notes",
+    "behavior_score", "scope_score", "engineering_score", "cost_efficiency", "notes",
 ]
 
 
@@ -45,17 +68,16 @@ def load_file(path: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def load_fixture(fixture_path: str) -> tuple[str, str]:
-    """Load fixture — file or directory. Returns (content_string, display_name)."""
-    p = BASE_DIR / fixture_path
-    if not p.exists():
-        sys.exit(f"Error: fixture not found: {p}")
-    if p.is_file():
-        return p.read_text(encoding="utf-8"), fixture_path
-    # directory: load all files, format as named blocks
-    files = sorted(f for f in p.iterdir() if f.is_file())
+def load_fixture(tmp_path: Path, fixture_path: str) -> tuple[str, str]:
+    """Load fixture from tmp workspace. Skips EXPECTED.md. Returns (content, display_name)."""
+    original = BASE_DIR / fixture_path
+    if original.is_file():
+        content = (tmp_path / original.name).read_text(encoding="utf-8")
+        return content, fixture_path
+    # directory fixture
+    files = sorted(f for f in tmp_path.iterdir() if f.is_file() and f.name != "EXPECTED.md")
     if not files:
-        sys.exit(f"Error: fixture directory is empty: {p}")
+        sys.exit(f"Error: fixture directory is empty: {tmp_path}")
     parts = []
     for f in files:
         ext = f.suffix.lstrip(".")
@@ -120,6 +142,7 @@ def call_openrouter(cfg: dict, model: str, messages: list[dict]) -> tuple[dict, 
 def extract_metrics(
     data: dict, latency_ms: int, bm_id: str,
     model: str, profile_path: str, task_path: str, fixture_path: str,
+    workspace_path: str,
 ) -> dict:
     usage = data.get("usage", {})
     choice = data["choices"][0] if data.get("choices") else {}
@@ -131,6 +154,7 @@ def extract_metrics(
         "profile": profile_path,
         "task": task_path,
         "fixture": fixture_path,
+        "workspace_path": workspace_path,
         "input_tokens": usage.get("prompt_tokens"),
         "output_tokens": usage.get("completion_tokens"),
         "latency_ms": latency_ms,
@@ -138,9 +162,9 @@ def extract_metrics(
         "finish_reason": choice.get("finish_reason"),
         "response": choice.get("message", {}).get("content", ""),
         # manual scoring — empty until human fills
-        "behavior_compliance": "",
-        "scope_discipline": "",
-        "engineering_quality": "",
+        "behavior_score": "",
+        "scope_score": "",
+        "engineering_score": "",
         "cost_efficiency": "",
         "notes": "",
     }
@@ -172,8 +196,6 @@ def main():
     task_paths = run["task"] if isinstance(run["task"], list) else [run["task"]]
     fixture_path = run["fixture"]
 
-    fixture_content, fixture_display = load_fixture(fixture_path)
-
     results = []
     log_lines = []  # accumulated verbose output saved to responses file
 
@@ -186,44 +208,48 @@ def main():
             for profile_path in profile_paths:
                 run_num += 1
                 bm_id = next_benchmark_id()
-                profile = load_file(profile_path)
-                messages = build_prompt(profile, task, fixture_content, fixture_path)
+                with workspace(bm_id, fixture_path) as tmp_path:
+                    fixture_content, fixture_display = load_fixture(tmp_path, fixture_path)
+                    profile = load_file(profile_path)
+                    messages = build_prompt(profile, task, fixture_content, fixture_path)
 
-                print(f"[{run_num}/{total}] {bm_id} | {model} | {Path(task_path).stem} | {Path(profile_path).stem} ...", end=" ", flush=True)
+                    print(f"[{run_num}/{total}] {bm_id} | {model} | {Path(task_path).stem} | {Path(profile_path).stem} ...", end=" ", flush=True)
 
-                data, latency_ms = call_openrouter(cfg, model, messages)
-                metrics = extract_metrics(data, latency_ms, bm_id, model, profile_path, task_path, fixture_path)
+                    data, latency_ms = call_openrouter(cfg, model, messages)
+                    metrics = extract_metrics(
+                        data, latency_ms, bm_id, model, profile_path, task_path, fixture_path,
+                        workspace_path=str(tmp_path),
+                    )
 
-                save_raw(metrics, bm_id)
-                append_csv(metrics)
+                    save_raw(metrics, bm_id)
+                    append_csv(metrics)
 
-                print(f"{latency_ms}ms")
+                    print(f"{latency_ms}ms")
 
-                # accumulate verbose output for the responses file
-                log_lines.append("=" * 60)
-                log_lines.append(f"ID:      {bm_id}")
-                log_lines.append(f"Model:   {model}")
-                log_lines.append(f"Profile: {profile_path}")
-                log_lines.append(f"Task:    {task_path}")
-                log_lines.append(f"Fixture: {fixture_display}")
-                log_lines.append(f"Latency: {latency_ms}ms")
-                log_lines.append(f"Input tokens:  {metrics['input_tokens']}")
-                log_lines.append(f"Output tokens: {metrics['output_tokens']}")
-                log_lines.append(f"Cost:          {metrics['cost_usd']}")
-                log_lines.append(f"Finish reason: {metrics['finish_reason']}")
-                log_lines.append(f"\n--- Response ---\n{metrics['response']}\n")
+                    log_lines.append("=" * 60)
+                    log_lines.append(f"ID:      {bm_id}")
+                    log_lines.append(f"Model:   {model}")
+                    log_lines.append(f"Profile: {profile_path}")
+                    log_lines.append(f"Task:    {task_path}")
+                    log_lines.append(f"Fixture: {fixture_display}")
+                    log_lines.append(f"Latency: {latency_ms}ms")
+                    log_lines.append(f"Input tokens:  {metrics['input_tokens']}")
+                    log_lines.append(f"Output tokens: {metrics['output_tokens']}")
+                    log_lines.append(f"Cost:          {metrics['cost_usd']}")
+                    log_lines.append(f"Finish reason: {metrics['finish_reason']}")
+                    log_lines.append(f"\n--- Response ---\n{metrics['response']}\n")
 
-                results.append({
-                    "id": bm_id,
-                    "model": model,
-                    "task": Path(task_path).stem,
-                    "profile": Path(profile_path).stem,
-                    "input": metrics["input_tokens"],
-                    "output": metrics["output_tokens"],
-                    "cost": metrics["cost_usd"],
-                    "latency_ms": latency_ms,
-                    "finish_reason": metrics["finish_reason"],
-                })
+                    results.append({
+                        "id": bm_id,
+                        "model": model,
+                        "task": Path(task_path).stem,
+                        "profile": Path(profile_path).stem,
+                        "input": metrics["input_tokens"],
+                        "output": metrics["output_tokens"],
+                        "cost": metrics["cost_usd"],
+                        "latency_ms": latency_ms,
+                        "finish_reason": metrics["finish_reason"],
+                    })
 
     # summary table (always, even single run)
     summary_lines = []
