@@ -1,10 +1,10 @@
-# Benchmark Runner v0.2
+# Benchmark Runner
 
-A workflow benchmark for AI engineering profiles.
+A workflow benchmark for evaluating AI software engineering behavior.
 
-## Purpose
+## Philosophy
 
-This is **not** an LLM benchmark. It measures whether a profile changes engineering behavior:
+This is not an LLM benchmark. It measures whether a profile changes engineering behavior:
 
 - Does it reduce unnecessary work?
 - Does it stay within scope?
@@ -13,11 +13,7 @@ This is **not** an LLM benchmark. It measures whether a profile changes engineer
 
 Same model. Same task. Same fixture. Different profile. Compare.
 
-## Philosophy
-
-A prompt benchmark measures verbosity. A workflow benchmark measures behavior.
-
-Each run records objective metrics (tokens, cost, latency) plus empty scoring columns you fill manually. The benchmark produces evidence. You produce judgement.
+A prompt benchmark measures verbosity. A workflow benchmark measures behavior. Each run records objective metrics (tokens, cost, latency) plus empty scoring columns you fill manually. The benchmark produces evidence. You produce judgment.
 
 ## Setup
 
@@ -32,7 +28,14 @@ export OPENROUTER_API_KEY=your_key_here
 python benchmark.py
 ```
 
-Each run appends a row to `results/reports/results.csv` and saves the full response to `results/raw/BM-XXXX.json`.
+Each run:
+1. Copies the fixture into `tmp/BM-xxxx/` (isolated workspace)
+2. Sends the prompt to the model
+3. Saves the full response to `results/raw/BM-xxxx.json`
+4. Appends a row to `results/reports/results.csv`
+5. Deletes `tmp/BM-xxxx/`
+
+Original fixtures are never modified.
 
 ## Configure
 
@@ -50,53 +53,78 @@ run:
   max_tokens: 1200
 ```
 
-`profile` accepts a single path or a list — runs one profile after another.
+`model`, `profile`, and `task` each accept a single value or a list — the runner iterates all combinations.
 
-`fixture` accepts a file path or a directory. For directories, all files are loaded and formatted as named code blocks in the prompt.
+`fixture` is a directory path. All files except `EXPECTED.md` are sent to the model.
 
 ## Structure
 
 ```
 benchmark/
-├── benchmark.py              # runner (~200 lines)
+├── benchmark.py              # runner (~280 lines)
 ├── config.yaml               # controls each run
 ├── requirements.txt
-├── profiles/                 # system prompts (what the model acts as)
+├── profiles/                 # system prompts
 │   ├── baseline.md
 │   ├── distilled.md
 │   └── ...
-├── tasks/                    # user instructions (what to do with the fixture)
+├── tasks/                    # user instructions
 │   ├── review.md
 │   ├── investigate.md
 │   ├── implement.md
+│   ├── bugfix.md
+│   ├── refactor.md
+│   ├── tests.md
+│   ├── documentation.md
 │   └── architecture.md
 ├── fixtures/                 # code fed to the model
-│   ├── python-review/        # single-file review scenario
-│   │   └── main.py
-│   ├── python-investigation/ # multi-file investigation scenario
+│   ├── python-investigation/
 │   │   ├── app.py
 │   │   ├── database.py
-│   │   └── auth.py
-│   └── python-implementation/ # buggy code + tests to pass
-│       ├── app.py
-│       └── tests.py
+│   │   ├── auth.py
+│   │   └── EXPECTED.md       ← never sent to model
+│   └── ...
+├── tmp/                      # created at runtime, auto-deleted
 └── results/
     ├── raw/                  # BM-0001.json, BM-0002.json, ...
+    ├── responses/            # combined run output
     └── reports/
         └── results.csv
 ```
 
-## Benchmark IDs
+## How fixtures work
 
-Every run gets a sequential ID: `BM-0001`, `BM-0002`, etc. The ID links the CSV row to the raw JSON.
+Each fixture is a directory of source files representing a small realistic codebase (target: under 250 lines total).
+
+Every fixture contains an `EXPECTED.md` file with:
+
+```markdown
+## Root Cause
+## Correct File
+## Expected Files
+## Expected Scope
+## Known Pitfalls
+```
+
+`EXPECTED.md` is **never sent to the model**. It exists only for manual evaluation after the run.
+
+## Creating a new fixture
+
+1. Create `fixtures/<name>/` directory
+2. Add source files (keep it under ~250 lines total — realistic, but not overwhelming)
+3. Write `EXPECTED.md` — what a correct answer looks like, what models commonly miss
+4. Set `fixture: "fixtures/<name>"` in `config.yaml`
+5. Run
+
+Make fixtures realistic: real bugs, real coupling, real ambiguity. Trivial fixtures produce trivial signal.
 
 ## Adding a new profile
 
-1. Create `profiles/<name>.md` — write the system prompt.
-2. Set `profile: "profiles/<name>.md"` in `config.yaml` (or add to the list).
-3. Run.
+1. Create `profiles/<name>.md` — write the system prompt
+2. Add `"profiles/<name>.md"` to the profile list in `config.yaml`
+3. Run
 
-To compare two profiles on identical inputs, list both:
+To compare two profiles on identical inputs:
 
 ```yaml
 profile:
@@ -106,49 +134,34 @@ profile:
 
 ## Adding a new task
 
-1. Create `tasks/<name>.md` — write the user instruction.
-2. Set `task: "tasks/<name>.md"` in `config.yaml`.
-3. Run.
+1. Create `tasks/<name>.md` — one concise instruction, specify scope constraints
+2. Set `task: "tasks/<name>.md"` in `config.yaml`
+3. Run
 
-Tasks should simulate real engineering requests: investigate, review, implement, plan.
+Tasks should simulate real engineering requests: investigate, review, implement, fix, refactor.
 
-## Adding a new fixture
+## Benchmark IDs
 
-**Single file:**
+Every run gets a sequential ID: `BM-0001`, `BM-0002`, etc. The ID links the CSV row to the raw JSON.
 
-```
-fixtures/my-scenario/main.py
-```
-
-Set `fixture: "fixtures/my-scenario/main.py"`.
-
-**Multi-file (directory):**
-
-```
-fixtures/my-scenario/
-  service.py
-  repository.py
-  tests.py
-```
-
-Set `fixture: "fixtures/my-scenario"`. All files are loaded and sent as named code blocks.
-
-Make fixtures realistic: real bugs, real coupling, real ambiguity. Trivial fixtures produce trivial signal.
-
-## Scoring
+## Manual scoring
 
 After a run, open `results/reports/results.csv` and fill in the manual columns:
 
 | Column | What to score (1–5) |
 |---|---|
-| `behavior_compliance` | Did it follow the profile's instructions? |
-| `scope_discipline` | Did it avoid unnecessary work and stay in scope? |
-| `engineering_quality` | Were the findings or implementation technically sound? |
-| `cost_efficiency` | Quality achieved relative to tokens and cost spent? |
+| `behavior_score` | Did it follow the profile's behavioral instructions? |
+| `scope_score` | Did it stay in scope and avoid unnecessary work? |
+| `engineering_score` | Were the findings or implementation technically sound? |
+| `cost_efficiency` | Quality achieved relative to tokens and cost? |
 | `notes` | Free text — what stood out |
+
+Compare the model's response against the fixture's `EXPECTED.md` to inform your scores.
 
 ## Comparing results
 
-Filter `results.csv` by `task` and `fixture` to isolate the variable (profile). Sort by `cost_usd` or `output_tokens` to see efficiency differences. Read raw JSON to compare response quality directly.
-
 A meaningful comparison: same `model` + same `task` + same `fixture`, different `profile`.
+
+Filter `results.csv` by `task` and `fixture` to isolate the variable. Sort by `cost_usd` or `output_tokens` to see efficiency differences. Open `results/raw/BM-xxxx.json` to read the full response.
+
+The `EXPECTED.md` in each fixture tells you what a correct answer looks like — use it to calibrate your scoring.
