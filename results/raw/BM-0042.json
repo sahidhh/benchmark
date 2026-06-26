@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0042",
+  "timestamp": "2026-06-26T12:17:11.904719+00:00",
+  "model": "qwen/qwen3-coder-30b-a3b-instruct",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 984,
+  "output_tokens": 303,
+  "latency_ms": 6469,
+  "cost_usd": 0.00015372,
+  "finish_reason": "stop",
+  "response": "### Bugs\n\n- **`OrderRepository.GetOrderAsync` (line 27)**: Reconstructs `OrderItem.Quantity` as `1` instead of preserving the original quantity, which was not stored.\n- **`OrderService.CalculateTotalAsync` (line 37)**: Fetches current product prices instead of the prices at the time of order placement, leading to incorrect totals if prices have changed.\n\n### Security Issues\n\n- **SQL Injection Vulnerability** (`OrderRepository.InsertOrderAsync`, line 15): The `itemsBlob` is constructed using `string.Join` and directly embedded into the SQL query without parameterization, exposing the application to SQL injection if `ProductId` values are not strictly validated.\n\n### Design Problems\n\n- **Data Integrity**: The `Order` model does not store item quantities, leading to loss of data and incorrect total calculations.\n- **Price Accuracy**: The `OrderService` does not persist product prices at order time, causing potential discrepancies in total calculations due to price changes.\n- **Inconsistent Data Handling**: The `OrderRepository` stores items as a comma-separated string, which is not a normalized approach and makes data retrieval and manipulation error-prone.\n- **Error Handling**: The `OrderService.CalculateTotalAsync` method throws a `KeyNotFoundException` for missing orders, which is not a standard practice; consider returning a `null` or using a more appropriate result type like `Result<decimal>` or `Optional<decimal>` for better error handling.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

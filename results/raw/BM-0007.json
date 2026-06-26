@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0007",
+  "timestamp": "2026-06-26T11:26:05.781503+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1219,
+  "output_tokens": 84,
+  "latency_ms": 2765,
+  "cost_usd": 0.0001555,
+  "finish_reason": "stop",
+  "response": "The bug originates in **OrderRepository.cs** at line 36.\n\nThe `GetOrderAsync` method reconstructs `OrderItem` objects from a comma-separated string of product IDs. During this reconstruction, the `Quantity` property of each `OrderItem` is hardcoded to `1`, regardless of the actual quantity ordered. This loss of quantity information is the root cause of the incorrect order total calculation.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

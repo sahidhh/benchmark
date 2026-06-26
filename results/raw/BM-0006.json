@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0006",
+  "timestamp": "2026-06-26T11:26:02.962698+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1285,
+  "output_tokens": 266,
+  "latency_ms": 11828,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "The bug originates from two related issues:\n\n1.  **Quantity Loss on Persistence:** When an order is placed, the `OrderRepository.InsertOrderAsync` method stores the `ProductId`s as a comma-separated string. The quantity information from the `OrderItem` is not persisted.\n2.  **Quantity Defaulting on Retrieval:** When an order is retrieved using `OrderRepository.GetOrderAsync`, the `itemsBlob` is split, and each `OrderItem` is reconstructed with a default `Quantity` of 1, regardless of the original quantity.\n\nThis leads to the observed behavior where quantities are always calculated as 1. The changing order total is likely due to the `OrderService.CalculateTotalAsync` method fetching the *current* product price using `OrderRepository.GetProductPriceAsync` instead of the price at the time the order was placed.\n\nThe exact file and line where the bug originates due to quantity loss and defaulting is in `OrderRepository.cs` at line 34:\n\n```csharp\n        var items = itemsBlob.Split(',').Select(id => new OrderItem\n        {\n            ProductId = int.Parse(id),\n            Quantity = 1, // <-- Quantity is hardcoded to 1 here\n        }).ToList();\n```",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

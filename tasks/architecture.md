@@ -1,0 +1,1 @@
+You are reviewing this codebase before a production refactor. Identify the top architectural risks: coupling, missing abstractions, scalability limits, and security boundaries. For each risk: name it, point to the specific file and line, and recommend the minimum change. Do not rewrite code. Do not mention issues that are out of scope for this codebase.

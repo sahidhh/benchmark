@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0001",
+  "timestamp": "2026-06-26T11:02:48.657649+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/python-investigation",
+  "input_tokens": 1057,
+  "output_tokens": 680,
+  "latency_ms": 12484,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "1.  **[HIGH]** app.py:13 - **SQL Injection**: The `get_user` function in `database.py` constructs a SQL query using f-strings with user-provided `username` and `password`. This is vulnerable to SQL injection.\n    *   **Suggestion**: Use parameterized queries for all database interactions involving user input.\n2.  **[HIGH]** auth.py:10 - **Hardcoded Secret Key**: The `SECRET` key used for signing is hardcoded and easily discoverable.\n    *   **Suggestion**: Store the secret key in environment variables or a secure configuration management system.\n3.  **[HIGH]** auth.py:10 - **Insecure Secret Key**: The `SECRET` key is too short and predictable (\"dev-secret-do-not-use-in-prod\").\n    *   **Suggestion**: Use a cryptographically secure random key of sufficient length.\n4.  **[HIGH]** database.py:21 - **Plaintext Password Storage**: Passwords are not hashed and are stored in plaintext in the database.\n    *   **Suggestion**: Hash passwords using a strong, salted hashing algorithm (e.g., bcrypt, scrypt, Argon2) before storing them.\n5.  **[HIGH]** database.py:21 - **SQL Injection**: The `get_user` function constructs a SQL query using f-strings with user-provided `username` and `password`. This is vulnerable to SQL injection.\n    *   **Suggestion**: Use parameterized queries for all database interactions involving user input.\n6.  **[MEDIUM]** app.py:27 - **Insecure Direct Object Reference / Missing Authorization**: The `/api/admin/users` endpoint is intended for administrators but has a `TODO` comment and no actual authorization check. Any authenticated user can access this endpoint.\n    *   **Suggestion**: Implement role-based access control to ensure only administrators can access this endpoint.\n7.  **[MEDIUM]** auth.py:10 - **Weak Token Generation**: The `SECRET` key is used in `sign_data` but `sign_data` is not used anywhere in the provided code. The `create_session` function generates tokens using `secrets.token_hex(32)` which is generally secure, but the lack of signing or expiration makes tokens potentially long-lived.\n    *   **Suggestion**: Consider adding token expiration and potentially signing tokens with a strong secret key to detect tampering.\n8.  **[LOW]** app.py:13 - **Information Exposure**: The login endpoint returns a 401 status code with a generic \"Invalid credentials\" message, which is good. However, the `get_user` function is called with both username and password, potentially logging these sensitive details if logging is enabled elsewhere.\n    *   **Suggestion**: Ensure sensitive credentials are not logged.\n9.  **[LOW]** app.py:32 - **Debug Mode Enabled**: The application is run with `debug=True` in production. This can expose sensitive information and security vulnerabilities.\n    *   **Suggestion**: Set `debug=False` when deploying to production.",
+  "behavior_score": "",
+  "scope_score": "",
+  "quality_score": "",
+  "verbosity_score": "",
+  "notes": ""
+}

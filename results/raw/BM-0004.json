@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0004",
+  "timestamp": "2026-06-26T11:22:58.937078+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1283,
+  "output_tokens": 265,
+  "latency_ms": 2969,
+  "cost_usd": 0.0002343,
+  "finish_reason": "stop",
+  "response": "The bug originates from how order items are stored and retrieved.\n\n**Root Cause:**\n\n1.  **Quantity Loss:** When an order is placed, `OrderRepository.InsertOrderAsync` stores only the `ProductId`s in a comma-separated string, losing the quantity information.\n2.  **Default Quantity:** When an order is retrieved by `OrderRepository.GetOrderAsync`, the `items` string is split, and each `OrderItem` is created with a hardcoded `Quantity` of `1`.\n3.  **Stale Pricing:** `OrderService.CalculateTotalAsync` fetches the *current* price of a product using `OrderRepository.GetProductPriceAsync`, not the price at the time the order was placed. This means the total can change if product prices are updated.\n\n**File and Line Number:**\n\nThe bug originates in `OrderRepository.cs` at line 35, where the `Quantity` is hardcoded to `1` during order retrieval.\n\n```csharp\n// OrderRepository.cs:35\nvar items = itemsBlob.Split(',').Select(id => new OrderItem\n{\n    ProductId = int.Parse(id),\n    Quantity = 1, // <-- Bug originates here\n}).ToList();\n```",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

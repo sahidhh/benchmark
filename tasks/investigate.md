@@ -1,0 +1,1 @@
+There is a bug in this codebase. A customer reports that their order total is wrong — it changes over time and quantities are always calculated as 1 regardless of what was ordered. Find the root cause. Identify the exact file and line where the bug originates. Do not fix it.

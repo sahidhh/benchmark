@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0030",
+  "timestamp": "2026-06-26T12:14:14.026789+00:00",
+  "model": "openai/gpt-oss-20b",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1143,
+  "output_tokens": 1200,
+  "latency_ms": 9437,
+  "cost_usd": 0.00019029,
+  "finish_reason": "length",
+  "response": "**1. [HIGH] OrderRepository.cs – Line 20‑27**  \n*Issue*: `InsertOrderAsync` stores `order.Items` as a comma‑separated list of product IDs, discarding quantity information.  \n*Suggestion*: Persist a separate `order_items` table with `order_id`, `product_id`, and `quantity` columns, or serialize the full `OrderItem` list (e.g., JSON) and store it in a column that preserves all fields.\n\n**2. [HIGH] OrderRepository.cs – Line 35‑42**  \n*Issue*: `GetOrderAsync` reconstructs `OrderItem` objects from the comma‑separated blob, defaulting `Quantity` to 1 and losing the original quantity.  \n*Suggestion*: Read the quantity from the data store (e.g., from the `order_items` table or JSON blob) instead of hard‑coding 1.\n\n**3. [MED] OrderRepository.cs – Line 48‑55**  \n*Issue*: `GetProductPriceAsync` retrieves the *current* price of a product, not the price at the time the order was placed. This can lead to incorrect total calculations if prices change.  \n*Suggestion*: Store the unit price in the order (or in the `order_items` table) at placement time and use that value for total calculation.\n\n**4. [MED] OrderRepository.cs – Line 12‑13**  \n*Issue*: `AddWithValue` infers parameter types from the supplied value, which can lead to implicit type conversions and performance penalties.  \n*Suggestion*: Use `SqlParameter` with explicit `SqlDbType` for each parameter.\n\n**5. [MED] OrderRepository.cs – Line 12‑13**  \n*Issue*: No transaction is used when inserting an order. If the insert succeeds but a subsequent operation fails, the database can be left in an inconsistent state.  \n*Suggestion*: Wrap the insert (and any related operations) in a `SqlTransaction`.\n\n**6. [LOW] OrderRepository.cs – Line 12‑13**  \n*Issue*: `AddWithValue` can silently truncate or round values (e.g., for decimals).  \n*Suggestion*: Explicitly set parameter precision/scale for decimal values.\n\n**7. [MED] OrderRepository.cs – Line 12‑13**  \n*Issue*: `ExecuteScalarAsync` may return `null` if the insert fails; casting to `(int)` will throw a `NullReferenceException`.  \n*Suggestion*: Check for `null` before casting or use `ExecuteNonQueryAsync` and retrieve the identity via `SCOPE_IDENTITY()`.\n\n**8. [MED] OrderRepository.cs – Line 12‑13**  \n*Issue*: No error handling for database exceptions; any `SqlException` will bubble up as an unhandled exception.  \n*Suggestion*: Catch `SqlException`, log details, and translate to a user‑friendly error response.\n\n**9. [MED] OrderRepository.cs – Line 12‑13**  \n*Issue*: The `itemsBlob` string can become very large for orders with many items, potentially exceeding column size limits.  \n*Suggestion*: Use a separate table for order items or a binary/JSON column with appropriate size.\n\n**10. [MED] OrderService.cs – Line 20‑27**  \n*Issue*: `PlaceOrderAsync` does not validate the `items` list (e.g., null, empty, or containing invalid product IDs).  \n*Suggestion*: Add validation logic and return a meaningful error if the request is malformed.\n\n**11. [MED] OrderService.cs – Line 20‑27**  \n*Issue*: No transaction is used when placing an",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

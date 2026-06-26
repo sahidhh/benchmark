@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0002",
+  "timestamp": "2026-06-26T11:02:53.318359+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/python-investigation",
+  "input_tokens": 1079,
+  "output_tokens": 55,
+  "latency_ms": 4610,
+  "cost_usd": 0.0001299,
+  "finish_reason": "stop",
+  "response": "Plaintext Password Storage: Easy\nSQL Injection (login): Easy\nSQL Injection (get_user): Easy\nHardcoded Secret Key: Medium\nInsecure Session Management: Medium\nSensitive Data Exposure (list_users): Easy\nMissing Authorization (list_users): Easy",
+  "behavior_score": "",
+  "scope_score": "",
+  "quality_score": "",
+  "verbosity_score": "",
+  "notes": ""
+}

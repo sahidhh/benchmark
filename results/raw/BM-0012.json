@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0012",
+  "timestamp": "2026-06-26T11:31:02.388886+00:00",
+  "model": "google/gemini-2.5-flash",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1221,
+  "output_tokens": 193,
+  "latency_ms": 5750,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "The root cause of the bug is that product quantities are not persisted, and product prices are fetched at the time of total calculation rather than at the time of order placement.\n\n**File:** `OrderRepository.cs`\n\n**Line where quantities are lost:** Line 22 (`var itemsBlob = string.Join(\",\", order.Items.Select(i => i.ProductId));`) - This line only stores product IDs, discarding the quantity information from `OrderItem`.\n\n**Line where quantities default to 1:** Line 45 (`Quantity = 1,`) - When an order is retrieved, the `Quantity` for each item is hardcoded to 1.\n\n**Line where current prices are fetched:** Line 62 (`var cmd = new SqlCommand(\"SELECT price FROM products WHERE id = @id\", conn);`) - This fetches the current price from the `products` table, not the price at the time the order was placed.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

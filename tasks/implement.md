@@ -1,0 +1,1 @@
+Add a `DeactivateAsync(int userId)` method to `UserService`. It should set the user's `Active` flag to false in the database. Do not add a new repository method if the existing ones are sufficient. Do not change `NotificationService`. Touch the minimum number of files.

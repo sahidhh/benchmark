@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0034",
+  "timestamp": "2026-06-26T12:14:47.913884+00:00",
+  "model": "openai/gpt-oss-20b",
+  "profile": "profiles/reviewer.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1116,
+  "output_tokens": 1200,
+  "latency_ms": 4734,
+  "cost_usd": 0.00025812,
+  "finish_reason": "length",
+  "response": null,
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

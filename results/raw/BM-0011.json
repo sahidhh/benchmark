@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0011",
+  "timestamp": "2026-06-26T11:30:56.615125+00:00",
+  "model": "google/gemini-2.5-flash",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1285,
+  "output_tokens": 88,
+  "latency_ms": 3078,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "The root cause of the bug is that order item quantities are not persisted, and product prices are not stored at the time of order placement.\n\n**File:** `OrderRepository.cs`\n**Line:** 20 (for quantities not persisted)\n**Line:** 40 (for quantities defaulting to 1 when reconstructed)\n**Line:** 62 (for fetching current product price instead of price at order time)",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

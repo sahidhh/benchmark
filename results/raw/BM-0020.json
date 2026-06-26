@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0020",
+  "timestamp": "2026-06-26T12:11:31.589234+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1232,
+  "output_tokens": 724,
+  "latency_ms": 5422,
+  "cost_usd": 0.0004128,
+  "finish_reason": "stop",
+  "response": "Here's a code review of the provided C# code:\n\n1.  [HIGH] `OrderRepository.cs`, Line 20: The `items` column in the `orders` table stores product IDs as a comma-separated string. This design loses quantity information and makes it difficult to query or analyze order details.\n    Suggestion: Use a separate table to store order items, with columns for `order_id`, `product_id`, and `quantity`.\n\n2.  [HIGH] `OrderRepository.cs`, Line 39: When retrieving an order, the `items` are reconstructed from a comma-separated string. The `Quantity` for each `OrderItem` is hardcoded to `1`. This is incorrect if the original order had quantities greater than one.\n    Suggestion: If the `items` column is to be kept, it should store quantity information (e.g., \"productId:quantity,productId:quantity\"). However, the better solution is to normalize the data as suggested in point 1.\n\n3.  [HIGH] `OrderService.cs`, Line 26: The `CalculateTotalAsync` method fetches the *current* price of products using `_repo.GetProductPriceAsync`. This means the calculated total can change over time if product prices are updated, which is not the expected behavior for a historical order total. The price at the time of order placement should be used.\n    Suggestion: Store the price of each item at the time the order is placed within the order details. This would require modifying the `Order` model and the `OrderRepository` to persist this information.\n\n4.  [MED] `OrderRepository.cs`, Line 20: The comment states \"quantities not persisted\". This is a direct consequence of the design choice to store items as a comma-separated string of product IDs.\n    Suggestion: Address the underlying data modeling issue (see point 1).\n\n5.  [MED] `OrderRepository.cs`, Line 39: The comment states \"Quantity is lost, defaults to 1\". This highlights the data loss issue.\n    Suggestion: Address the underlying data modeling issue (see point 1).\n\n6.  [MED] `OrderRepository.cs`, Line 59: The comment states \"fetches CURRENT price — not the price at order time\". This points out the incorrect pricing logic for calculating totals.\n    Suggestion: Address the pricing logic issue (see point 3).\n\n7.  [LOW] `OrderRepository.cs`, Line 20: Using `string.Join` to create the `itemsBlob` can be inefficient for very large lists of items.\n    Suggestion: For performance-critical scenarios with potentially many items, consider alternative serialization methods if sticking with a single column, though a normalized schema is preferred.\n\n8.  [LOW] `OrderRepository.cs`, Line 47: `int.Parse(id)` could throw a `FormatException` if the `itemsBlob` contains non-integer values.\n    Suggestion: Add error handling or validation to ensure that the parsed IDs are valid integers. Consider using `int.TryParse` for safer conversion.\n\n9.  [LOW] `OrderService.cs`, Line 26: Throwing `KeyNotFoundException` is acceptable, but a more specific exception type like `OrderNotFoundException` could improve clarity.\n    Suggestion: Define and throw a custom exception type for order not found scenarios.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0035",
+  "timestamp": "2026-06-26T12:15:08.584276+00:00",
+  "model": "qwen/qwen3.5-flash-02-23",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1148,
+  "output_tokens": 3682,
+  "latency_ms": 20656,
+  "cost_usd": 0.00103194,
+  "finish_reason": "stop",
+  "response": "1. [HIGH] `OrderController.PlaceOrder` (Line 17): `UserId` is accepted from the request body.\n   **Issue:** Allows users to place orders on behalf of other users (IDOR/Privilege Escalation).\n   **Suggestion:** Derive `UserId` from the authenticated user's claims, not the request payload.\n\n2. [HIGH] `OrderController` (Line 8): Missing `[Authorize]` attribute.\n   **Issue:** The entire controller is publicly accessible without authentication.\n   **Suggestion:** Add `[Authorize]` to the controller or specific actions to enforce authentication.\n\n3. [HIGH] `OrderRepository.InsertOrderAsync` (Line 15): Items stored as comma-separated string.\n   **Issue:** `OrderItem.Quantity` is ignored during persistence; data integrity is compromised.\n   **Suggestion:** Normalize the database schema to use a separate `OrderItems` table with `OrderId`, `ProductId`, and `Quantity` columns.\n\n4. [HIGH] `OrderService.CalculateTotalAsync` (Line 23): Fetches current product price.\n   **Issue:** Historical order totals are inaccurate if product prices change after the order is placed.\n   **Suggestion:** Store the unit price at the time of order placement in the `OrderItems` table.\n\n5. [MED] `OrderService.CalculateTotalAsync` (Line 23): N+1 Query Problem.\n   **Issue:** Iterates through items and executes a separate database query for each item's price.\n   **Suggestion:** Fetch all required product prices in a single query (e.g., `WHERE id IN (...)`) and map them in memory.\n\n6. [MED] `OrderController.GetTotal` (Line 24): Improper error handling.\n   **Issue:** `KeyNotFoundException` from `CalculateTotalAsync` results in a 500 Internal Server Error instead of 404 Not Found.\n   **Suggestion:** Catch the exception in the controller and return `NotFound()`.\n\n7. [LOW] `OrderRepository` (Lines 15, 45): Use of `AddWithValue`.\n   **Issue:** Can lead to implicit type conversion issues or SQL injection vulnerabilities if not handled carefully.\n   **Suggestion:** Use explicit parameter types (e.g., `cmd.Parameters.Add(\"@id\", SqlDbType.Int).Value = orderId`).",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

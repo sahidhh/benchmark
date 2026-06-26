@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0036",
+  "timestamp": "2026-06-26T12:15:35.830111+00:00",
+  "model": "qwen/qwen3.5-flash-02-23",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1171,
+  "output_tokens": 5345,
+  "latency_ms": 27219,
+  "cost_usd": 0.001465815,
+  "finish_reason": "stop",
+  "response": "### Security Issues\n\n*   **OrderController.PlaceOrder (Line 17):** `UserId` is accepted from the request body (`request.UserId`). This allows users to place orders on behalf of other users. User identity should be derived from authentication claims, not the request payload.\n*   **OrderController.GetTotal (Line 24):** No authorization check is performed. Any user can query the total for any `orderId`. Access should be restricted to the order owner.\n\n### Bugs\n\n*   **OrderRepository.InsertOrderAsync (Line 20):** `itemsBlob` serializes only `ProductId`. `Quantity` is lost during storage.\n*   **OrderRepository.GetOrderAsync (Line 47):** Reconstructs `OrderItem` with `Quantity = 1`. Historical quantity data is incorrect upon retrieval.\n*   **OrderRepository.GetProductPriceAsync (Line 66):** Queries the `products` table for the *current* price. If product prices change, `CalculateTotalAsync` returns incorrect historical totals.\n*   **OrderService.CalculateTotalAsync (Line 36):** Calls `GetProductPriceAsync` inside a `foreach` loop. This causes an N+1 query problem (one query per item), degrading performance.\n*   **OrderService.CalculateTotalAsync (Line 30):** Throws `KeyNotFoundException` if order is missing. In an API context, this typically results in a 500 error; a 404 response is more appropriate.\n\n### Design Problems\n\n*   **OrderRepository (Line 20):** Storing a list of items as a comma-separated string violates database normalization. It prevents querying, filtering, or indexing individual items.\n*   **OrderService.PlaceOrderAsync (Line 15):** No validation for empty `items` list or null values before persisting data.\n*   **OrderController.GetTotal (Line 24):** Missing `[FromRoute]` attribute for `orderId`. While implicit binding works, explicit binding improves code clarity.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

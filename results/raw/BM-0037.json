@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0037",
+  "timestamp": "2026-06-26T12:15:53.813492+00:00",
+  "model": "qwen/qwen3.5-flash-02-23",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1108,
+  "output_tokens": 3890,
+  "latency_ms": 17969,
+  "cost_usd": 0.00108342,
+  "finish_reason": "stop",
+  "response": "### OrderController.cs\n\n*   **Security (Line 17):** `PlaceOrder` accepts `request.UserId` from the client body without verifying the authenticated user's identity. This allows users to place orders on behalf of others (IDOR/Impersonation).\n*   **Security (General):** Missing `[Authorize]` attribute on the controller or actions.\n*   **Design (Line 23):** `GetTotal` triggers a dynamic calculation on every request. If prices change, the historical order total becomes inaccurate (see `OrderService` bug).\n\n### OrderRepository.cs\n\n*   **Bug (Line 19):** `InsertOrderAsync` ignores `OrderItem.Quantity` when creating the `itemsBlob`. Data is lost during insertion.\n*   **Bug (Line 45):** `GetOrderAsync` hardcodes `Quantity = 1` when reconstructing items from the CSV blob, compounding the data loss.\n*   **Bug (Line 57):** `GetProductPriceAsync` fetches the *current* product price. Orders should reflect the price at the time of purchase, not the current market price.\n*   **Bug (Line 62):** `GetProductPriceAsync` casts `ExecuteScalarAsync` directly to `decimal`. If the product is not found, `null` is returned, causing an `InvalidCastException`.\n*   **Design (Line 19):** Storing a collection as a comma-separated string violates database normalization (1NF) and makes querying/filtering items impossible.\n*   **Design (Line 15):** Connection string is passed as a raw string in the constructor rather than being injected via DI/Configuration.\n*   **Robustness (Line 21):** `AddWithValue` is used for parameters, which infers types and can lead to performance issues or type mismatches.\n\n### OrderService.cs\n\n*   **Performance (Line 29):** `CalculateTotalAsync` calls `GetProductPriceAsync` inside a `foreach` loop. This results in an N+1 query problem (one query per item).\n*   **Design (Line 29):** Relies on `GetProductPriceAsync` which fetches volatile data (current price) instead of snapshot data stored on the order.\n*   **Design (Line 13):** `PlaceOrderAsync` does not validate the `items` list (e.g., null, empty, or max size) before persisting.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0026",
+  "timestamp": "2026-06-26T12:12:31.406245+00:00",
+  "model": "deepseek/deepseek-v4-flash",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1109,
+  "output_tokens": 792,
+  "latency_ms": 21906,
+  "cost_usd": 0.00037702,
+  "finish_reason": "stop",
+  "response": "## Code Review: OrderController, OrderRepository, OrderService\n\n### Bugs\n\n1. **OrderRepository.cs, line 47** – `reader.GetDateTime(3)` uses wrong column index. The SELECT order is `id(0), user_id(1), items(2), created_at(3), status(4)`, so `created_at` is index 3, but `status` is index 4. The code reads `status` as `GetDateTime(3)` and `created_at` as `GetString(4)`, swapping types. This will throw `InvalidCastException` at runtime.\n\n2. **OrderRepository.cs, line 46** – `itemsBlob.Split(',')` on an empty string returns `[\"\"]` (one element with empty string), which `int.Parse(\"\")` will throw `FormatException`. If an order has zero items, this crashes.\n\n3. **OrderRepository.cs, line 48** – `Quantity` is hardcoded to `1` because quantities are not persisted. This silently corrupts order data on retrieval.\n\n### Security Issues\n\n4. **OrderController.cs, line 22** – No input validation on `request.UserId` or `request.Items`. An attacker can place orders for any `UserId` (e.g., another customer's ID) because there is no authorization check linking the authenticated user to the `UserId` in the request.\n\n5. **OrderRepository.cs, line 14** – SQL injection via `string.Join(\",\", order.Items.Select(i => i.ProductId))`. Although `ProductId` is an `int`, if `OrderItem.ProductId` is ever changed to a string type, this becomes injectable. More importantly, the blob approach itself is fragile.\n\n6. **OrderRepository.cs, line 15** – `AddWithValue` can cause type mismatches and plan cache pollution. For `@items` (a string), it works, but `@userId` and `@id` are integers passed as strings, potentially causing implicit conversions and poor index usage.\n\n### Design Problems\n\n7. **OrderRepository.cs, lines 12-13** – Items stored as a comma-separated string of product IDs. This violates first normal form, loses quantity data, and makes querying (e.g., \"all orders containing product X\") impossible without full table scans and string parsing.\n\n8. **OrderRepository.cs, lines 38-39** – `GetProductPriceAsync` fetches the *current* product price, not the price at the time the order was placed. This means `CalculateTotalAsync` returns a different amount over time, which is incorrect for invoicing, refunds, and financial records.\n\n9. **OrderService.cs, line 30** – `CalculateTotalAsync` makes N+1 database calls (one `GetOrderAsync` + N `GetProductPriceAsync` calls per item). For an order with 100 items, this executes 101 queries sequentially.\n\n10. **OrderController.cs, line 22** – `PlaceOrder` accepts a raw `PlaceOrderRequest` but never validates stock availability, product existence, or duplicate orders. This can lead to overselling.\n\n11. **OrderRepository.cs, line 1** – Uses `System.Data.SqlClient` (deprecated). Should use `Microsoft.Data.SqlClient`.\n\n12. **OrderRepository.cs, line 5** – Constructor takes a raw connection string. No `IConfiguration` injection, no `IOptions<T>`, no `DbConnection` factory. This makes testing and configuration management harder.\n\n13. **OrderService.cs, line 24** – Throws `KeyNotFoundException` from a service layer. The controller has no exception filter or try-catch, so this will return a 500 error instead of a proper 404 response.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

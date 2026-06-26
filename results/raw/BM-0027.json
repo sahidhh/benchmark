@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0027",
+  "timestamp": "2026-06-26T12:12:43.075452+00:00",
+  "model": "deepseek/deepseek-v4-flash",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1050,
+  "output_tokens": 1192,
+  "latency_ms": 11656,
+  "cost_usd": 0.000336532,
+  "finish_reason": "stop",
+  "response": "## Issues\n\n### OrderController.cs\n- **Missing authorization/authentication** – No `[Authorize]` attribute; any client can place orders for any `UserId` (line 11) and retrieve any order total (line 17).\n- **Lack of input validation** – `PlaceOrderRequest` (line 12) is not validated; e.g., `UserId` could be zero/negative, `Items` could be null or empty.\n- **No CancellationToken** – Async actions (lines 13, 18) do not accept `CancellationToken`, risking hangs on client disconnect.\n\n### OrderRepository.cs\n- **Data loss: quantity not persisted** – `InsertOrderAsync` (line 23) stores only product IDs as a comma‑separated string; quantities are discarded. `GetOrderAsync` (line 40) defaults `Quantity = 1`.\n- **Price fetched at calculation time, not at order time** – `GetProductPriceAsync` (line 48) retrieves the current price from `products`, but the price at order placement is never stored. Consequently `CalculateTotalAsync` in `OrderService` will produce inconsistent results if prices change.\n- **Potential `NullReferenceException` in `GetProductPriceAsync`** – Line 50 casts `ExecuteScalarAsync` result directly to `decimal`; if no product exists for `productId`, the result is `null` and the cast throws.\n- **Hardcoded column ordinals** – `GetOrderAsync` (lines 38, 39, 41, 42) uses magic numbers (`GetInt32(0)`, `GetString(2)` etc.), fragile if schema changes.\n- **No transaction for concurrent access** – `InsertOrderAsync` and subsequent price lookups are not wrapped in a transaction; inconsistent state possible.\n- **Security: no validation that referenced products exist** – `InsertOrderAsync` stores product IDs without verifying they exist in the `products` table; `GetProductPriceAsync` may later fail on invalid IDs.\n\n### OrderService.cs\n- **Throws `KeyNotFoundException` in `CalculateTotalAsync`** (line 24) – This is a runtime exception; controller ends up returning 500 instead of a proper 404.\n- **No null/empty check on `items` in `PlaceOrderAsync`** (line 12) – If `items` is null, `order.Items` will cause null reference later.\n- **No price snapshot captured at order time** – As noted in the repository, `PlaceOrderAsync` does not persist the price of each item, making `CalculateTotalAsync` unreliable.\n\n### General Design Problems\n- **Denormalised storage of order items** – Using a comma‑separated blob loses relational integrity and makes querying, reporting, and auditing impossible.\n- **No pricing or inventory checks during order placement** – `PlaceOrderAsync` does not verify that products exist, are in stock, or have a valid price.\n- **Missing `CancellationToken` propagation** – All async methods lack `CancellationToken` parameters, preventing cooperative cancellation.\n- **Absence of logging / error handling** – Failures (e.g., SQL exceptions) are unhandled and will bubble up as 500 responses.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0025",
+  "timestamp": "2026-06-26T12:12:09.487453+00:00",
+  "model": "deepseek/deepseek-v4-flash",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1092,
+  "output_tokens": 1190,
+  "latency_ms": 16203,
+  "cost_usd": 0.00045788736,
+  "finish_reason": "stop",
+  "response": "1. [HIGH] **OrderRepository.InsertOrderAsync (line 21-22)**: Items are stored as a comma-separated string of product IDs only; quantities are discarded. This means the system permanently loses quantity data for each order.\n\n2. [HIGH] **OrderRepository.GetOrderAsync (line 35)**: When reconstructing items from the stored blob, `Quantity` is hardcoded to `1`, effectively losing the original quantity. Combined with finding #1, order quantities are completely broken.\n\n3. [HIGH] **OrderRepository.GetProductPriceAsync (line 44) & OrderService.CalculateTotalAsync (line 31)**: The total is computed by fetching the current product price from the database rather than using the price at the time of order placement. This causes the order total to change over time if product prices are updated – a classic design flaw.\n\n4. [HIGH] **OrderController (lines 19, 24)**: Both `PlaceOrder` and `GetTotal` endpoints lack any authentication or authorization checks. An attacker can place orders on behalf of any user or retrieve totals for any order ID (e.g., by guessing or enumerating IDs).\n\n5. [MED] **OrderService.CalculateTotalAsync (line 28-31)**: For each item in the order, a separate database query is made to `GetProductPriceAsync`. This results in an N+1 query pattern that can severely degrade performance when an order has many items.\n\n6. [MED] **OrderController (lines 13, 22)**: No exception handling is applied. If `OrderService.PlaceOrderAsync` or `CalculateTotalAsync` throws an exception (e.g., `KeyNotFoundException` for missing order), the controller returns a generic 500 Internal Server Error instead of a proper 404 or other structured error response.\n\n7. [MED] **OrderRepository (line 10-11)**: Items are stored as a comma-separated string (CSV). This is fragile (e.g., breaks if a product ID contains commas, though unlikely with integers), prevents efficient querying of order items, and violates normalisation principles. A separate `order_items` table would be far more robust.\n\n8. [LOW] **OrderController.PlaceOrder (line 13-14)**: No input validation is performed on the `PlaceOrderRequest`. Missing fields, empty items list, negative quantities, or invalid user IDs are accepted without checks, potentially leading to database constraint violations or logical errors.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

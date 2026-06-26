@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "BM-0010",
+  "timestamp": "2026-06-26T11:30:53.515808+00:00",
+  "model": "google/gemini-2.5-flash",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1261,
+  "output_tokens": 165,
+  "latency_ms": 4047,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "1.  **[HIGH]** `OrderRepository.cs`, Line 20: `// Items stored as comma-separated product IDs — quantities not persisted`\n    The `InsertOrderAsync` method only stores `ProductId` in the `items` column, completely omitting the `Quantity` for each item. This is the root cause of quantities always being calculated as 1.\n\n2.  **[HIGH]** `OrderRepository.cs`, Line 45: `// fetches CURRENT price — not the price at order time`\n    The `GetProductPriceAsync` method retrieves the current price of a product. This means that if a product's price changes after an order is placed, the calculated total for that order will also change, leading to an incorrect historical total.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}
