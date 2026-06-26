@@ -6,6 +6,10 @@
 
 `UserService.cs` — add the method here.
 
+## Expected Files
+
+`UserService.cs` (required). `UserRepository.cs` (if a new repository method is needed to set `Active = false`).
+
 ## Expected Scope
 
 `DeactivateAsync` should:
