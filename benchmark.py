@@ -259,7 +259,7 @@ def main():
     summary_lines.append("| ID       | Model                          | Task                 | Profile              | Input | Output | Latency |     Cost | Finish  |")
     summary_lines.append("|----------|--------------------------------|----------------------|----------------------|------:|-------:|--------:|---------:|---------|")
     for r in results:
-        cost = f"${r['cost']:.4f}" if r["cost"] else "-"
+        cost = f"${r['cost']:.4f}" if r["cost"] is not None else "-"
         summary_lines.append(
             f"| {r['id']:<8} | {r['model']:<30} | {r['task']:<20} | {r['profile']:<20} "
             f"| {r['input'] or '-':>5} | {r['output'] or '-':>6} | {r['latency_ms']:>7} | {cost:>8} | {r['finish_reason'] or '-'} |"
