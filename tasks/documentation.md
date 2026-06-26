@@ -1,0 +1,1 @@
+Write developer documentation for this codebase. Cover: purpose, key components, data flow, and anything non-obvious. Write for a developer joining the team, not an end user. Do not restate what the code already makes obvious.
