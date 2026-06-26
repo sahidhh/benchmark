@@ -26,6 +26,8 @@ def workspace(bm_id: str, fixture_path: str):
     """Copy fixture into tmp/BM-xxxx/, yield the path, delete on exit."""
     src = BASE_DIR / fixture_path
     dst = TMP_DIR / bm_id
+    if not src.exists():
+        sys.exit(f"Error: fixture not found: {src}")
     if src.is_dir():
         shutil.copytree(src, dst)
     else:
