@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0046",
+  "timestamp": "2026-06-28T16:34:13.517889+00:00",
+  "model": "anthropic/claude-sonnet-4-6",
+  "provider": "auto",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1380,
+  "output_tokens": 241,
+  "latency_ms": 9297,
+  "cost_usd": 0.007755,
+  "finish_reason": "stop",
+  "response": "There are two distinct bugs, both originating in **OrderRepository.cs**.\n\n---\n\n1. **[HIGH] OrderRepository.cs, line 22** — Quantities are never persisted. The `itemsBlob` is built using only `ProductId`, discarding `Quantity` entirely. When the order is later reconstructed in `GetOrderAsync`, every item's `Quantity` is hardcoded to `1` (line 40) because the data was never stored. The fix must happen at the write side: the blob (or schema) needs to encode quantity alongside product ID.\n\n2. **[HIGH] OrderRepository.cs, line 55** — `GetProductPriceAsync` queries the `products` table for the **current** price, not the price at the time the order was placed. Since no historical price is captured at order placement, the total will silently change whenever a product's price is updated. The price must be snapshotted at order time (e.g., stored in the order items) and retrieved from that snapshot, not from the live `products` table.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

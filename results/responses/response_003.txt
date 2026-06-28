@@ -1,0 +1,432 @@
+============================================================
+ID:       BM-0051
+Model:    anthropic/claude-sonnet-4-6
+Provider: auto
+Profile:  profiles/reviewer.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  31250ms
+Input:    1373 tokens
+Output:   1455 tokens
+Cost:     0.025944
+Finish:   stop
+
+--- Response ---
+## Security Findings (Critical)
+
+### 1. SQL Injection — `UserService.cs`, lines 22, 38, 52, 62
+**Severity: Critical**
+
+`GetByEmail`, `UpdateRole`, `DeactivateUser`, and `GetUserById` all use string interpolation to build SQL queries. Every one of these is a textbook SQL injection vector. `email` is user-supplied input from the login and reset-password endpoints.
+
+```cs
+$"SELECT id, email, role FROM users WHERE email = '{email}'"  // line 22
+$"UPDATE users SET role = '{role}' WHERE id = {userId}"       // line 38
+```
+
+Fix: Use `SqlParameter` for all query parameters.
+
+---
+
+### 2. Plaintext Password Comparison — `AuthController.cs`, line 27
+**Severity: Critical**
+
+```cs
+if (user.PasswordHash != req.Password)
+```
+
+The field is named `PasswordHash` but is compared directly to the raw password string. Either passwords are stored in plaintext, or the hash comparison is wrong. Neither is acceptable. A proper hash comparison (e.g., `BCrypt.Verify`) must be used.
+
+---
+
+### 3. Predictable Password Reset Token — `AuthController.cs`, line 48
+**Severity: Critical**
+
+```cs
+var resetToken = user.Id.ToString();
+```
+
+The reset token is the user's integer ID. An attacker can enumerate all user IDs and reset any account's password without knowing the original credentials.
+
+Fix: Use `RandomNumberGenerator` to generate a cryptographically random token, store it with an expiry, and invalidate it after use.
+
+---
+
+### 4. Unauthenticated Admin Endpoint — `AuthController.cs`, line 55
+**Severity: Critical**
+
+`ListAllUsers()` has no `[Authorize]` attribute and no manual authorization check. Any caller — authenticated or not — can retrieve the full user list.
+
+Fix: Add `[Authorize(Roles = "Admin")]`.
+
+---
+
+### 5. Refresh Token Not Validated Against Storage — `AuthController.cs`, lines 35–42
+**Severity: High**
+
+`Refresh` accepts any parseable JWT and issues a new token without checking whether the refresh token was ever issued, has been revoked, or belongs to an active session. A stolen or forged token grants indefinite access.
+
+Fix: Store issued refresh tokens server-side, validate on use, and delete after rotation.
+
+---
+
+### 6. No Rate Limiting on Login — `AuthController.cs`, line 20
+**Severity: High**
+
+The comment acknowledges this. Unlimited login attempts enable brute-force and credential-stuffing attacks.
+
+Fix: Apply middleware-level rate limiting (e.g., `AspNetCoreRateLimit`) or account lockout after N failures.
+
+---
+
+### 7. Timing Side-Channel on Email Enumeration — `AuthController.cs`, lines 23–27
+**Severity: Medium**
+
+The early return on unknown email (`return Unauthorized` at line 24) has measurably different latency than the password-check path. An attacker can determine whether an email is registered by measuring response time.
+
+Fix: Always perform the password hash comparison (against a dummy hash) before returning, regardless of whether the user was found.
+
+---
+
+## Correctness Findings
+
+### 8. `GetByEmailAsync` Calls Synchronous Method — `UserService.cs`
+**Severity: High**
+
+`AuthController` calls `_users.GetByEmailAsync(...)` (lines 22, 43) but `UserService` only defines the synchronous `GetByEmail`. This is either a compile error or there is an undisclosed async wrapper. If a blocking sync method is wrapped with `.Result` or `.GetAwaiter().GetResult()`, it risks thread-pool starvation under load.
+
+---
+
+### 9. `UpdateRole` Silently Ignores Missing User — `UserService.cs`, line 40
+**Severity: Medium**
+
+```cs
+cmd.ExecuteNonQuery();
+// no rowcount check
+```
+
+If `userId` does not exist, the update silently succeeds with zero rows affected. Callers have no way to distinguish a successful update from a no-op.
+
+Fix: Check `ExecuteNonQuery()` return value and throw or return a meaningful result.
+
+---
+
+### 10. `PasswordHash` Not Fetched in Query — `UserService.cs`, line 22
+**Severity: High**
+
+```sql
+SELECT id, email, role FROM users WHERE email = '{email}'
+```
+
+The `password_hash` column is never selected, yet `AuthController` line 27 compares `user.PasswordHash`. `UserDto` has no `PasswordHash` field, so either the comparison always fails, always passes, or this code does not compile as shown.
+
+---
+
+## Performance / Design Findings
+
+### 11. Double Connection in `DeactivateUser` — `UserService.cs`, lines 44–55
+**Severity: Low**
+
+`DeactivateUser` calls `GetUserById` (which opens and closes a connection), then opens a second connection for the update. This is two round-trips where one suffices, and wastes connection-pool resources.
+
+Fix: Combine into a single parameterized `UPDATE ... WHERE id = @id` and check rows affected.
+
+---
+
+### 12. `LoginRequest` Accepts Null Inputs — `AuthController.cs`, line 65
+**Severity: Medium**
+
+```cs
+public record LoginRequest(string Email, string Password);
+```
+
+No `[Required]` attributes or null guards. A request with `null` email will cause a null-reference exception inside `GetByEmailAsync` before any validation occurs.
+
+Fix: Add `[Required]` and consider `[EmailAddress]` on `Email`.
+
+---
+
+### 13. Connection String Injected as Raw String — `UserService.cs`, line 12
+**Severity: Low / Design**
+
+Injecting a raw `string` for the connection string bypasses the typed options pattern (`IOptions<T>`) and makes the dependency opaque to the DI container. It also makes testing harder.
+
+Fix: Inject `IOptions<DatabaseOptions>` or `IConfiguration` and read the value by key.
+
+============================================================
+ID:       BM-0052
+Model:    anthropic/claude-sonnet-4-6
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  26094ms
+Input:    1397 tokens
+Output:   1195 tokens
+Cost:     0.022116
+Finish:   stop
+
+--- Response ---
+# Code Review Findings
+
+## AuthController.cs
+
+1. **[HIGH] `Login` method, line 27** — Plaintext password comparison. `user.PasswordHash != req.Password` compares the stored hash directly against the raw input. Password is never hashed before comparison, meaning passwords are likely stored in plaintext, or the comparison will always fail if they are hashed. Use a constant-time hash verification method such as `BCrypt.Verify` or `PasswordHasher.VerifyHashedPassword`.
+
+2. **[HIGH] `Login` method, line 23–27** — Timing side-channel via early return. Returning before reaching the password check when the email is not found produces a measurably different response latency, allowing email enumeration. Always perform the password hash comparison regardless of whether the user was found (using a dummy hash).
+
+3. **[HIGH] `Login` method, line 20** — No rate limiting or account lockout. Unlimited login attempts enable brute-force and credential-stuffing attacks. Apply `[EnableRateLimiting]`, middleware-level throttling, or incremental lockout logic.
+
+4. **[HIGH] `Refresh` method, lines 35–42** — Refresh token is not validated against a server-side store. Any structurally valid JWT is accepted, meaning a stolen, expired, or revoked token can generate a fresh access token indefinitely. Refresh tokens must be stored server-side and invalidated on use (rotation) or revocation.
+
+5. **[HIGH] `ResetPassword` method, line 52** — Reset token is the user's integer ID (`user.Id.ToString()`). This is fully predictable and allows an attacker to request a password reset for any user by guessing sequential IDs. Use a cryptographically random token (e.g., `RandomNumberGenerator.GetHexString`) with an expiry, stored server-side.
+
+6. **[HIGH] `ListAllUsers` method, line 59** — No authentication or authorization check on an admin endpoint. Any caller, including unauthenticated ones, can retrieve all user records. Apply `[Authorize(Roles = "Admin")]` and ensure the route is not publicly accessible.
+
+7. **[LOW] `AuthController` constructor, lines 12–16** — `UserService` is called with `GetByEmailAsync` in the controller but the method defined in `UserService` is synchronous (`GetByEmail`). This suggests either a missing async implementation or a naming mismatch that will cause a compile error.
+
+---
+
+## UserService.cs
+
+8. **[HIGH] `GetByEmail` method, lines 18–24** — SQL injection via string interpolation. The `email` parameter is concatenated directly into the query string. An attacker can inject arbitrary SQL. Use parameterized queries (`cmd.Parameters.AddWithValue("@email", email)`).
+
+9. **[HIGH] `UpdateRole` method, lines 27–32** — SQL injection via string interpolation on both `role` and `userId`. The `role` string is unsanitized and directly embedded in the query. Parameterize both values.
+
+10. **[HIGH] `GetUserById` method, lines 44–50** — SQL injection via string interpolation on `userId`. Although `userId` is typed as `int`, the interpolation pattern is inconsistent with safe practice and fragile. Parameterize for consistency and safety.
+
+11. **[MED] `UpdateRole` method, lines 27–32** — Silent no-op when `userId` does not exist. `ExecuteNonQuery` returns the affected row count, which is ignored. A caller updating a nonexistent user receives no error signal, masking bugs or misuse. Check `cmd.ExecuteNonQuery() == 0` and throw or return a meaningful result.
+
+12. **[MED] `DeactivateUser` method, lines 35–43** — Unnecessary double database round-trip. `GetUserById` opens and closes one connection; then `DeactivateUser` opens a second. The existence check and the update can be combined into a single parameterized `UPDATE` statement, checking the affected row count to determine if the user existed.
+
+13. **[MED] `GetByEmail` method, line 15** — Method is synchronous (`GetByEmail`) but the controller calls `GetByEmailAsync`. The service lacks async implementations throughout, forcing synchronous I/O on async controller actions, which blocks thread-pool threads under load. All database methods should use `async`/`await` with `ExecuteReaderAsync`, `ExecuteNonQueryAsync`, etc.
+
+14. **[LOW] `UserService` constructor, line 11** — The connection string is injected as a raw `string`. Prefer injecting `IConfiguration` or a typed options object (e.g., `DatabaseOptions`) to make the dependency explicit and testable.
+
+15. **[LOW] `GetByEmail` / `GetUserById`, lines 23–24 / 48–49** — `PasswordHash` is absent from `UserDto` but is required by `Login` for credential verification. Either the DTO is incomplete (a correctness bug) or the hash is stored in a separate field not shown, which should be made explicit.
+
+============================================================
+ID:       BM-0053
+Model:    google/gemini-2.5-flash
+Provider: auto
+Profile:  profiles/reviewer.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  9421ms
+Input:    1277 tokens
+Output:   1495 tokens
+Cost:     None
+Finish:   length
+
+--- Response ---
+Review:
+
+## Correctness
+
+1.  **AuthController.cs:L24 `Login` - Timing Side-Channel**
+    *   **Description**: The `Login` method checks for the user's existence by email before comparing the password hash. If the user does not exist, it returns `Unauthorized` early. This creates a timing side-channel where an attacker can differentiate between an unknown email and a known email with an incorrect password based on the response time.
+    *   **Severity**: High
+
+2.  **AuthController.cs:L35 `Refresh` - Insecure Refresh Token Validation**
+    *   **Description**: The `Refresh` method accepts any valid-looking JWT as a refresh token. It only parses the claims from the provided token and generates a new one. There is no mechanism to validate if the provided token is actually a *refresh token* issued by the system, or if it has been revoked, or if it's a regular access token being re-used. This allows an attacker to potentially use a stolen access token as a refresh token indefinitely.
+    *   **Severity**: Critical
+
+3.  **AuthController.cs:L49 `ResetPassword` - Predictable Reset Token**
+    *   **Description**: The `ResetPassword` method uses `user.Id.ToString()` as the password reset token. User IDs are typically sequential and easily guessable or enumerable. This makes the reset token highly predictable and insecure, allowing an attacker to easily reset any user's password if they know their user ID.
+    *   **Severity**: Critical
+
+4.  **UserService.cs:L35 `UpdateRole` - No Rowcount Check**
+    *   **Description**: The `UpdateRole` method executes an `UPDATE` statement but does not check the number of affected rows. If `userId` does not exist, the operation will silently succeed without updating any record, which might lead to unexpected behavior or make debugging harder.
+    *   **Severity**: Medium
+
+5.  **UserService.cs:L43 `DeactivateUser` - Redundant Database Connection**
+    *   **Description**: The `DeactivateUser` method calls `GetUserById`, which opens a database connection. Subsequently, `DeactivateUser` opens a *second* database connection to perform the update. This is inefficient and unnecessary.
+    *   **Severity**: Low
+
+## Security
+
+1.  **AuthController.cs:L20 `Login` - No Rate Limiting**
+    *   **Description**: The `Login` endpoint has no rate limiting implemented. This allows an attacker to perform an unlimited number of login attempts, making it vulnerable to brute-force attacks against user passwords.
+    *   **Severity**: Critical
+
+2.  **AuthController.cs:L60 `ListAllUsers` - Missing Authorization**
+    *   **Description**: The `ListAllUsers` endpoint, despite being under an "admin" route, has no authorization check. Any authenticated (or potentially unauthenticated, depending on global filters) caller can access this endpoint and retrieve a list of all users, leading to information disclosure.
+    *   **Severity**: Critical
+
+3.  **UserService.cs:L20 `GetByEmail` - SQL Injection Vulnerability**
+    *   **Description**: The `GetByEmail` method constructs its SQL query by directly concatenating the `email` parameter into the string. This makes the application vulnerable to SQL injection attacks, where a malicious user can inject arbitrary SQL code through the `email` input.
+    *   **Severity**: Critical
+
+4.  **UserService.cs:L33 `UpdateRole` - SQL Injection Vulnerability**
+    *   **Description**: Similar to `GetByEmail`, the `UpdateRole` method constructs its SQL query by directly concatenating the `role` parameter. This is vulnerable to SQL injection.
+    *   **Severity**: Critical
+
+5.  **UserService.cs:L47 `DeactivateUser` - SQL Injection Vulnerability**
+    *   **Description**: The `DeactivateUser` method constructs its SQL query by directly concatenating the `userId` parameter. While `userId` is an integer, if it were ever derived from untrusted input without proper parsing, it could lead to injection. In this specific case, `userId` comes from an internal call, but the pattern is dangerous.
+    *   **Severity**: High (due to pattern, though less direct risk here)
+
+6.  **UserService.cs:L57 `GetUserById` - SQL Injection Vulnerability**
+    *   **Description**: The `GetUserById` method constructs its SQL query by directly concatenating the `userId` parameter. Similar to `DeactivateUser`, while `userId` is an integer, this pattern is dangerous and should use parameterized queries.
+    *   **Severity**: High (due to pattern)
+
+## Maintainability
+
+1.  **UserService.cs:L10 `UserService` - Connection String Management**
+    *   **Description**: The `UserService` constructor takes the connection string directly as a `string` parameter. While functional, it's generally better practice in ASP.NET Core to inject `IConfiguration` or use `IOptions<T>` for configuration values like connection strings. This makes configuration more centralized and testable.
+    *   **Severity**: Low
+
+2.  **UserService.cs:L17 `GetByEmail` and other methods - Repetitive SQL Connection/Command Setup**
+    *   **Description**: The pattern of `using var conn = new SqlConnection(_connStr); conn.Open(); var cmd = new SqlCommand(...)` is repeated in every database access method. This leads to code duplication and makes it harder to change database access logic or add common error handling. A helper method or a repository pattern could abstract this.
+    *   **Severity**: Medium
+
+3.  **AuthController.cs:L27 `Login` - Password Hashing**
+    *   **Description**: The code `user.PasswordHash != req.Password` implies that `user.PasswordHash` is storing the raw password or a simple hash. Modern applications should use strong, slow hashing algorithms (e.g., Argon2, bcrypt, scrypt) with salts. The current comparison suggests a potentially weak or insecure password storage mechanism.
+    *   **Severity**: Critical (assuming `PasswordHash` is not a proper salted hash)
+
+## Design Problems
+
+1.  **AuthController.cs:L27 `Login` - Password Storage (Implicit)**
+    *   **Description**: The line `user.PasswordHash != req.Password` strongly suggests that `user.PasswordHash` is either storing plain text passwords or using a weak, unsalted hash. A secure system would store a salted, cryptographically strong hash (e.g., bcrypt, Argon2) and use a dedicated library function to verify the password.
+    *   **Severity**: Critical
+
+2.  **TokenService (Implied) - Lack of Refresh Token Storage/Revocation**
+    *   **Description**: The `Refresh` endpoint's vulnerability (Security #
+
+============================================================
+ID:       BM-0054
+Model:    google/gemini-2.5-flash
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  7422ms
+Input:    1303 tokens
+Output:   1192 tokens
+Cost:     None
+Finish:   stop
+
+--- Response ---
+1.  [HIGH] `AuthController.cs`, `Login` method, line 20: **Security - Timing Side-Channel**. The comparison `user.PasswordHash != req.Password` occurs only after a successful email lookup. This creates a timing difference between an invalid email and a valid email with a wrong password, potentially allowing an attacker to enumerate valid email addresses.
+    *   **Suggestion**: Use a constant-time comparison for passwords. Always perform a dummy password hash comparison if the user is not found to equalize timing.
+
+2.  [HIGH] `AuthController.cs`, `Login` method, line 17: **Security - No Rate Limiting**. There is no rate limiting on login attempts, making the endpoint vulnerable to brute-force attacks.
+    *   **Suggestion**: Implement a robust rate-limiting mechanism (e.g., IP-based, user-based after a certain number of attempts) to prevent brute-force attacks.
+
+3.  [HIGH] `AuthController.cs`, `Refresh` method, line 35: **Security - Insecure Refresh Token Validation**. The refresh token is not validated against a stored refresh token. Any valid-looking JWT is accepted, which means if an access token is compromised, it can be used indefinitely to generate new tokens, even if the user's session should have been revoked.
+    *   **Suggestion**: Implement a proper refresh token mechanism where refresh tokens are stored in a secure database, associated with a user, and invalidated upon use or logout. They should also have an expiration and be single-use.
+
+4.  [HIGH] `AuthController.cs`, `ResetPassword` method, line 50: **Security - Predictable Reset Token**. The `resetToken` is simply the `user.Id.ToString()`, which is predictable and not a secure random value. An attacker could easily guess or enumerate reset tokens.
+    *   **Suggestion**: Generate a cryptographically secure, random, and time-limited token for password resets. Store this token securely (e.g., hashed) in the database and invalidate it after use or expiration.
+
+5.  [HIGH] `AuthController.cs`, `ListAllUsers` method, line 57: **Security - Missing Authorization**. There is no authorization check, allowing any authenticated (or potentially unauthenticated, depending on other middleware) caller to list all users. This exposes sensitive user data.
+    *   **Suggestion**: Implement proper authorization (e.g., using `[Authorize(Roles = "Admin")]` attribute or policy-based authorization) to restrict access to this endpoint to authorized users only.
+
+6.  [HIGH] `UserService.cs`, `GetByEmail` method, line 20: **Security - SQL Injection**. The SQL query `$"SELECT id, email, role FROM users WHERE email = '{email}'"` directly concatenates the `email` parameter, making it vulnerable to SQL injection.
+    *   **Suggestion**: Use parameterized queries (e.g., `SqlCommand.Parameters.AddWithValue`) to prevent SQL injection.
+
+7.  [HIGH] `UserService.cs`, `UpdateRole` method, line 33: **Security - SQL Injection**. The SQL query `$"UPDATE users SET role = '{role}' WHERE id = {userId}"` directly concatenates the `role` parameter, making it vulnerable to SQL injection.
+    *   **Suggestion**: Use parameterized queries to prevent SQL injection.
+
+8.  [MED] `UserService.cs`, `UpdateRole` method, line 36: **Correctness - No Rowcount Check**. The method silently succeeds even if `userId` doesn't exist, leading to a false sense of success.
+    *   **Suggestion**: Check `cmd.ExecuteNonQuery()`'s return value. If it's 0, throw an exception or return a boolean indicating that no user was updated.
+
+9.  [MED] `UserService.cs`, `DeactivateUser` method, line 44: **Performance - Multiple DB Connections**. The `GetUserById` method opens a database connection, and then the `DeactivateUser` method opens a second, separate connection. This is inefficient and unnecessary.
+    *   **Suggestion**: Refactor `DeactivateUser` to either pass the existing connection to `GetUserById` or retrieve the user details and then perform the update within a single connection scope. Alternatively, if `GetUserById` is only used for existence checks, a more efficient `UserExists(int userId)` method could be used.
+
+10. [MED] `UserService.cs`, `GetUserById` method, line 54: **Security - SQL Injection**. The SQL query `$"SELECT id, email, role FROM users WHERE id = {userId}"` directly concatenates the `userId` parameter, making it vulnerable to SQL injection if `userId` were not an integer (though less likely in this specific case, it's a bad pattern).
+    *   **Suggestion**: Use parameterized queries to prevent SQL injection.
+
+11. [LOW] `UserService.cs`, `GetByEmail` method, line 16: **Design - Synchronous DB Call**. The method `GetByEmail` is synchronous, but the `AuthController` calls it with `await _users.GetByEmailAsync(req.Email)`. This implies an `Async` version is expected but not implemented. The current implementation will block the thread.
+    *   **Suggestion**: Implement `GetByEmailAsync` using `SqlCommand.ExecuteReaderAsync()` and `SqlConnection.OpenAsync()` to ensure proper asynchronous operation and avoid blocking threads. The same applies to `UpdateRole`, `DeactivateUser`, and `GetUserById`.
+
+============================================================
+ID:       BM-0055
+Model:    deepseek/deepseek-r1
+Provider: auto
+Profile:  profiles/reviewer.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  16938ms
+Input:    1151 tokens
+Output:   1500 tokens
+Cost:     0.010619235
+Finish:   length
+
+--- Response ---
+None
+
+============================================================
+ID:       BM-0056
+Model:    deepseek/deepseek-r1
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/review.md
+Fixture:  fixtures/dotnet-review
+Latency:  136640ms
+Input:    1179 tokens
+Output:   3699 tokens
+Cost:     0.0100728
+Finish:   stop
+
+--- Response ---
+### Review Findings
+
+#### **AuthController.cs**
+1. **[HIGH]** `Login` method (line 22):  
+   **Issue:** Timing side-channel vulnerability allows email enumeration (early exit on invalid email).  
+   **Suggestion:** Use constant-time comparison for password checks regardless of email validity.
+
+2. **[HIGH]** `Login` method (line 25):  
+   **Issue:** Compares plain-text password (`req.Password`) against stored hash (`user.PasswordHash`), indicating plain-text storage or incorrect hashing.  
+   **Suggestion:** Hash `req.Password` before comparing with `user.PasswordHash` using a secure algorithm (e.g., bcrypt).
+
+3. **[HIGH]** `Refresh` method (line 37):  
+   **Issue:** Accepts any valid JWT as a refresh token without server-side validation, allowing token reuse or revocation bypass.  
+   **Suggestion:** Validate refresh tokens against a persistent store (e.g., database) and check token type.
+
+4. **[HIGH]** `ListAllUsers` method (line 64):  
+   **Issue:** Missing authorization, exposing sensitive user data to unauthenticated/non-admin users.  
+   **Suggestion:** Add `[Authorize(Roles = "Admin")]` attribute.
+
+5. **[MED]** `ResetPassword` method (line 52):  
+   **Issue:** Reset token is the user's ID (predictable), enabling account takeover via token guessing.  
+   **Suggestion:** Generate a cryptographically secure random token (e.g., using `RandomNumberGenerator`).
+
+---
+
+#### **UserService.cs**
+6. **[HIGH]** `GetByEmail`, `UpdateRole`, `DeactivateUser`, `GetUserById` methods:  
+   **Issue:** SQL injection via raw string concatenation (e.g., `$"SELECT ... WHERE email = '{email}'"`).  
+   **Suggestion:** Use parameterized queries (`SqlCommand.Parameters`).
+
+7. **[HIGH]** `GetByEmail` method:  
+   **Issue:** Returns `UserDto` without `PasswordHash`, causing `Login` to fail (missing field).  
+   **Suggestion:** Include `PasswordHash` in the `SELECT` query and `UserDto`.
+
+8. **[MED]** `UpdateRole` method (line 33):  
+   **Issue:** No row validation after `UPDATE`, silently failing for invalid `userId`.  
+   **Suggestion:** Check `ExecuteNonQuery` return value and handle missing users.
+
+9. **[MED]** `DeactivateUser` method (line 39):  
+   **Issue:** Opens redundant database connection (`GetUserById` uses a separate connection).  
+   **Suggestion:** Reuse the connection or combine operations in a single query.
+
+10. **[LOW]** `DeactivateUser` method (line 39):  
+    **Issue:** Potential race condition between `GetUserById` check and update.  
+    **Suggestion:** Perform update unconditionally and verify row count.
+
+11. **[LOW]** `GetByEmail` method:  
+    **Issue:** Synchronous DB calls (`ExecuteReader`) in async context (AuthController uses `GetByEmailAsync`).  
+    **Suggestion:** Implement `GetByEmailAsync` with `ExecuteReaderAsync`.
+
+
+## Summary
+
+| ID       | Model                     | Provider | Task           | Profile        | Input | Output | Latency |     Cost | Finish |
+|----------|---------------------------|----------|----------------|----------------|------:|-------:|--------:|---------:|--------|
+| BM-0051  | anthropic/claude-sonnet-4-6 | auto     | review         | reviewer       |  1373 |   1455 |   31250 |  $0.0259 | stop |
+| BM-0052  | anthropic/claude-sonnet-4-6 | auto     | review         | baseline       |  1397 |   1195 |   26094 |  $0.0221 | stop |
+| BM-0053  | google/gemini-2.5-flash   | auto     | review         | reviewer       |  1277 |   1495 |    9421 |        - | length |
+| BM-0054  | google/gemini-2.5-flash   | auto     | review         | baseline       |  1303 |   1192 |    7422 |        - | stop |
+| BM-0055  | deepseek/deepseek-r1      | auto     | review         | reviewer       |  1151 |   1500 |   16938 |  $0.0106 | length |
+| BM-0056  | deepseek/deepseek-r1      | auto     | review         | baseline       |  1179 |   3699 |  136640 |  $0.0101 | stop |

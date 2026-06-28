@@ -1,4 +1,4 @@
-"""Benchmark Runner v0.4 — workflow benchmark for engineering profiles.
+"""Benchmark Runner v0.5 — workflow benchmark for engineering profiles.
 
 CLI overrides (all optional — config.yaml used as base):
   --model MODEL         Override model (or comma-separated list)
@@ -6,13 +6,19 @@ CLI overrides (all optional — config.yaml used as base):
   --task TASK           Override task path (or comma-separated list)
   --fixture FIXTURE     Override fixture path
   --provider PROVIDER   Pin OpenRouter provider (e.g. 'Fireworks', 'Together')
+  --max-tokens N        Override max_tokens
   --config CONFIG       Use alternate config file (default: config.yaml)
   --dry-run             Print matrix without running
 
+Notes:
+  - Gemini BYOK runs show cost_usd=0 (charged to your Google key). Check
+    OpenRouter activity CSV for byok_usage_inference to get real cost.
+  - DeepSeek-r1 tokens_reasoning shows hidden thinking tokens you are billed for.
+
 Examples:
-  python benchmark.py --model google/gemini-2.5-flash-lite --task tasks/investigate.md
-  python benchmark.py --provider Fireworks --config config-t2.yaml
-  python benchmark.py --model anthropic/claude-sonnet-4-6,anthropic/claude-opus-4-8 --dry-run
+  python benchmark.py --model google/gemini-2.5-flash --task tasks/investigate.md
+  python benchmark.py --config config-t2-review.yaml --model google/gemini-2.5-flash --max-tokens 2500
+  python benchmark.py --model anthropic/claude-sonnet-4-6 --dry-run
 """
 
 import argparse
@@ -35,20 +41,22 @@ RESULTS_RESPONSES = BASE_DIR / "results" / "responses"
 
 CSV_FIELDS = [
     "benchmark_id", "timestamp", "model", "provider", "profile", "task", "fixture",
-    "input_tokens", "output_tokens", "latency_ms", "cost_usd", "finish_reason",
+    "input_tokens", "output_tokens", "tokens_reasoning", "latency_ms", "cost_usd",
+    "finish_reason",
     "behavior_compliance", "scope_discipline", "engineering_quality", "cost_efficiency", "notes",
 ]
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Benchmark Runner v0.4")
-    p.add_argument("--model",    help="Model(s) comma-separated to override config")
-    p.add_argument("--profile",  help="Profile path(s) comma-separated")
-    p.add_argument("--task",     help="Task path(s) comma-separated")
-    p.add_argument("--fixture",  help="Fixture path")
-    p.add_argument("--provider", help="Pin OpenRouter provider (e.g. Fireworks, Together)")
-    p.add_argument("--config",   default="config.yaml", help="Config file")
-    p.add_argument("--dry-run",  action="store_true", help="Print matrix without executing")
+    p = argparse.ArgumentParser(description="Benchmark Runner v0.5")
+    p.add_argument("--model",      help="Model(s) comma-separated to override config")
+    p.add_argument("--profile",    help="Profile path(s) comma-separated")
+    p.add_argument("--task",       help="Task path(s) comma-separated")
+    p.add_argument("--fixture",    help="Fixture path")
+    p.add_argument("--provider",   help="Pin OpenRouter provider (e.g. Fireworks, Together)")
+    p.add_argument("--max-tokens", type=int, dest="max_tokens", help="Override max_tokens")
+    p.add_argument("--config",     default="config.yaml", help="Config file")
+    p.add_argument("--dry-run",    action="store_true", help="Print matrix without executing")
     return p.parse_args()
 
 
@@ -66,7 +74,6 @@ def load_config(config_file: str = "config.yaml") -> dict:
 
 
 def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
-    """Merge CLI args into config, overriding config.yaml values."""
     run = cfg.setdefault("run", {})
     if args.model:
         run["model"] = [m.strip() for m in args.model.split(",")]
@@ -76,6 +83,8 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
         run["task"] = [t.strip() for t in args.task.split(",")]
     if args.fixture:
         run["fixture"] = args.fixture
+    if args.max_tokens is not None:
+        run["max_tokens"] = args.max_tokens
     if args.provider:
         cfg.setdefault("openrouter", {})["provider"] = args.provider
     return cfg
@@ -89,7 +98,6 @@ def load_file(path: str) -> str:
 
 
 def load_fixture(fixture_path: str) -> tuple:
-    """Load fixture -- file or directory. Returns (content_string, display_name)."""
     p = BASE_DIR / fixture_path
     if not p.exists():
         sys.exit(f"Error: fixture not found: {p}")
@@ -148,14 +156,12 @@ def call_openrouter(cfg: dict, model: str, messages: list) -> tuple:
     if "max_tokens" in run:
         payload["max_tokens"] = run["max_tokens"]
 
-    # Provider pinning -- prevents silent routing between providers at different
-    # quantization levels. Set via --provider flag or config openrouter.provider.
     provider = cfg.get("openrouter", {}).get("provider")
     if provider:
         payload["provider"] = {"order": [provider], "allow_fallbacks": False}
 
     start = time.monotonic()
-    resp = requests.post(url, headers=headers, json=payload, timeout=120)
+    resp = requests.post(url, headers=headers, json=payload, timeout=300)
     latency_ms = round((time.monotonic() - start) * 1000)
 
     if not resp.ok:
@@ -168,6 +174,10 @@ def extract_metrics(data, latency_ms, bm_id, model, provider, profile_path, task
     usage = data.get("usage", {})
     choice = data["choices"][0] if data.get("choices") else {}
     cost = usage.get("cost") or data.get("cost")
+    # reasoning tokens: present for DeepSeek-r1 and other thinking models
+    tokens_reasoning = usage.get("completion_tokens_details", {}).get("reasoning_tokens") \
+        or usage.get("reasoning_tokens") \
+        or 0
     return {
         "benchmark_id": bm_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -178,6 +188,7 @@ def extract_metrics(data, latency_ms, bm_id, model, provider, profile_path, task
         "fixture": fixture_path,
         "input_tokens": usage.get("prompt_tokens"),
         "output_tokens": usage.get("completion_tokens"),
+        "tokens_reasoning": tokens_reasoning if tokens_reasoning else "",
         "latency_ms": latency_ms,
         "cost_usd": cost,
         "finish_reason": choice.get("finish_reason"),
@@ -223,7 +234,8 @@ def main():
 
     if args.dry_run:
         provider_label = cfg.get("openrouter", {}).get("provider", "auto")
-        print(f"Dry run -- {total} runs [provider: {provider_label}]\n")
+        mt = run.get("max_tokens", "config")
+        print(f"Dry run -- {total} runs [provider: {provider_label}] [max_tokens: {mt}]\n")
         n = 0
         for model in models:
             for task_path in task_paths:
@@ -257,7 +269,9 @@ def main():
 
                 save_raw(metrics, bm_id)
                 append_csv(metrics)
-                print(f"{latency_ms}ms")
+
+                reasoning_note = f" [reasoning: {metrics['tokens_reasoning']}]" if metrics["tokens_reasoning"] else ""
+                print(f"{latency_ms}ms{reasoning_note}")
 
                 log_lines.append("=" * 60)
                 log_lines.append(f"ID:       {bm_id}")
@@ -269,7 +283,8 @@ def main():
                 log_lines.append(f"Latency:  {latency_ms}ms")
                 log_lines.append(f"Input:    {metrics['input_tokens']} tokens")
                 log_lines.append(f"Output:   {metrics['output_tokens']} tokens")
-                log_lines.append(f"Cost:     {metrics['cost_usd']}")
+                log_lines.append(f"Reasoning:{metrics['tokens_reasoning']} tokens")
+                log_lines.append(f"Cost:     {metrics['cost_usd']} (Gemini BYOK: check openrouter activity)")
                 log_lines.append(f"Finish:   {metrics['finish_reason']}")
                 log_lines.append(f"\n--- Response ---\n{metrics['response']}\n")
 
@@ -281,21 +296,22 @@ def main():
                     "profile": Path(profile_path).stem,
                     "input": metrics["input_tokens"],
                     "output": metrics["output_tokens"],
+                    "reasoning": metrics["tokens_reasoning"] or "-",
                     "cost": metrics["cost_usd"],
                     "latency_ms": latency_ms,
                     "finish_reason": metrics["finish_reason"],
                 })
 
     summary_lines = ["\n## Summary\n"]
-    hdr = "| ID       | Model                     | Provider | Task           | Profile        | Input | Output | Latency |     Cost | Finish |"
-    sep = "|----------|---------------------------|----------|----------------|----------------|------:|-------:|--------:|---------:|--------|"
+    hdr = "| ID       | Model                     | Prov | Task           | Profile        | In  | Out | Reason | Lat(ms) | Cost     | Finish |"
+    sep = "|----------|---------------------------|------|----------------|----------------|----:|----:|-------:|--------:|---------:|--------|"
     summary_lines.extend([hdr, sep])
     for r in results:
-        cost = f"${r['cost']:.4f}" if r["cost"] else "-"
+        cost = f"${r['cost']:.4f}" if r["cost"] else "BYOK"
         row = (
-            f"| {r['id']:<8} | {r['model']:<25} | {r['provider']:<8} | {r['task']:<14} | "
-            f"{r['profile']:<14} | {str(r['input'] or '-'):>5} | {str(r['output'] or '-'):>6} | "
-            f"{r['latency_ms']:>7} | {cost:>8} | {r['finish_reason'] or '-'} |"
+            f"| {r['id']:<8} | {r['model']:<25} | {r['provider']:<4} | {r['task']:<14} | "
+            f"{r['profile']:<14} | {str(r['input'] or '-'):>3} | {str(r['output'] or '-'):>3} | "
+            f"{str(r['reasoning']):>6} | {r['latency_ms']:>7} | {cost:>8} | {r['finish_reason'] or '-'} |"
         )
         summary_lines.append(row)
 

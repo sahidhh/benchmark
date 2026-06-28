@@ -1,0 +1,81 @@
+============================================================
+ID:       BM-0060
+Model:    google/gemini-2.5-flash
+Provider: auto
+Profile:  profiles/investigation.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  7110ms
+Input:    1257 tokens
+Output:   1158 tokens
+Reasoning: tokens
+Cost:     None (Gemini BYOK: check openrouter activity)
+Finish:   stop
+
+--- Response ---
+The customer report indicates two distinct issues:
+
+1.  **Order total changes over time:** This suggests that the price of products is not fixed at the time of order placement but is instead retrieved dynamically when the total is calculated.
+2.  **Quantities are always calculated as 1:** This points to an issue where the original quantity ordered for each item is not being correctly stored or retrieved.
+
+Let's investigate the codebase to find the root cause for each.
+
+### Investigation
+
+**1. Order total changes over time:**
+
+*   **`OrderController.cs`**: The `GetTotal` endpoint calls `_orderService.CalculateTotalAsync(orderId)`.
+*   **`OrderService.cs`**: `CalculateTotalAsync` retrieves the `Order` from the repository and then iterates through its items. For each item, it calls `_repo.GetProductPriceAsync(item.ProductId)`.
+*   **`OrderRepository.cs`**: `GetProductPriceAsync` executes a SQL query: `"SELECT price FROM products WHERE id = @id"`.
+
+**Evidence:** The comment in `OrderRepository.cs` on line 70 explicitly states: "// fetches CURRENT price — not the price at order time". This confirms that the price is fetched from the `products` table at the time of calculation, not at the time of order placement. If product prices change in the `products` table, the order total will change accordingly.
+
+**Root Cause for "Order total changes over time":**
+The system fetches the current product price from the `products` table when calculating the order total, rather than storing and using the price at the time the order was placed.
+
+**Exact file and line:** `OrderRepository.cs`, line 70 (the comment, but the logic is implemented by the `SELECT price FROM products` query on line 72).
+
+---
+
+**2. Quantities are always calculated as 1:**
+
+*   **`OrderController.cs`**: The `PlaceOrder` endpoint sends `request.Items` (which includes quantities) to `_orderService.PlaceOrderAsync`.
+*   **`OrderService.cs`**: `PlaceOrderAsync` creates an `Order` object with the provided `items` and calls `_repo.InsertOrderAsync(order)`.
+*   **`OrderRepository.cs`**: `InsertOrderAsync` processes the `order.Items`.
+
+**Evidence:**
+*   In `OrderRepository.cs`, line 20: `var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));`
+    *   This line creates a comma-separated string of *only* `ProductId`s. The `Quantity` property of `OrderItem` is completely ignored and not included in `itemsBlob`.
+*   In `OrderRepository.cs`, line 44: `var items = itemsBlob.Split(',').Select(id => new OrderItem { ProductId = int.Parse(id), Quantity = 1, }).ToList();`
+    *   When an order is retrieved, this line reconstructs the `OrderItem` list. Since the quantity was never stored, it hardcodes `Quantity = 1` for every item.
+
+**Root Cause for "Quantities are always calculated as 1":**
+The `OrderRepository` only stores the `ProductId`s of items in a comma-separated string, completely omitting the `Quantity` information during order insertion. When an order is retrieved, the `Quantity` is hardcoded to `1` for all items because the original quantity is not available.
+
+**Exact file and line:**
+*   **Origin of data loss:** `OrderRepository.cs`, line 20 (`var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));`)
+*   **Origin of incorrect reconstruction:** `OrderRepository.cs`, line 44 (`Quantity = 1,`)
+
+### Findings and Recommended Next Steps
+
+**Findings:**
+
+1.  **Dynamic Pricing:** The order total is calculated using the current product prices from the `products` table, not the prices at the time the order was placed. This causes the total to fluctuate if product prices change.
+2.  **Quantity Loss:** The quantity for each order item is not persisted in the database. When an order is retrieved, the quantity for all items is hardcoded to `1`.
+
+**Recommended Next Steps (Do not implement):**
+
+1.  **For Dynamic Pricing:**
+    *   Modify the `OrderRepository.InsertOrderAsync` method to store the `price` of each `OrderItem` at the time of order placement. This would likely involve a more structured way of storing order items (e.g., a separate `order_items` table with `product_id`, `quantity`, and `unit_price` columns) instead of a comma-separated string.
+    *   Modify `OrderRepository.GetOrderAsync` to retrieve these stored prices.
+    *   Modify `OrderService.CalculateTotalAsync` to use the stored prices instead of calling `_repo.GetProductPriceAsync`.
+2.  **For Quantity Loss:**
+    *   Modify the `OrderRepository.InsertOrderAsync` method to correctly persist the `Quantity` for each `OrderItem`. As mentioned above, a separate `order_items` table would be the most robust solution.
+    *   Modify `OrderRepository.GetOrderAsync` to retrieve the actual quantities from the stored data.
+
+
+## Summary
+
+| ID       | Model                     | Prov | Task           | Profile        | In  | Out | Reason | Lat(ms) | Cost     | Finish |
+|----------|---------------------------|------|----------------|----------------|----:|----:|-------:|--------:|---------:|--------|
+| BM-0060  | google/gemini-2.5-flash   | auto | investigate    | investigation  | 1257 | 1158 |      - |    7110 |     BYOK | stop |

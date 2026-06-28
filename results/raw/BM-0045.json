@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0045",
+  "timestamp": "2026-06-28T16:34:04.199513+00:00",
+  "model": "anthropic/claude-sonnet-4-6",
+  "provider": "auto",
+  "profile": "profiles/investigation.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1376,
+  "output_tokens": 706,
+  "latency_ms": 16094,
+  "cost_usd": 0.014718,
+  "finish_reason": "stop",
+  "response": "## Root Cause Analysis\n\nThere are **two distinct bugs**, both originating in `OrderRepository.cs`.\n\n---\n\n### Bug 1 — Quantities Always Calculated as 1\n\n**File:** `OrderRepository.cs`\n**Lines:** 28–29 (INSERT) and 44–48 (SELECT reconstruction)\n\n**Evidence:**\n\nIn `InsertOrderAsync`, the items blob is built as:\n```cs\n// Line 28-29\nvar itemsBlob = string.Join(\",\", order.Items.Select(i => i.ProductId));\n```\n\nOnly `ProductId` values are serialized — `Quantity` is **never written to the database**. The column comment even confirms this: `// Items stored as comma-separated product IDs — quantities not persisted`.\n\nWhen the order is later read back in `GetOrderAsync`, the blob is deserialized as:\n```cs\n// Lines 44-48\nvar items = itemsBlob.Split(',').Select(id => new OrderItem\n{\n    ProductId = int.Parse(id),\n    Quantity = 1,   // ← hardcoded; no quantity was stored to recover\n}).ToList();\n```\n\nBecause quantity was never persisted, every `OrderItem` is reconstructed with `Quantity = 1` regardless of what the customer actually ordered.\n\n---\n\n### Bug 2 — Order Total Changes Over Time\n\n**File:** `OrderRepository.cs`\n**Lines:** 55–61\n\n**Evidence:**\n\n```cs\npublic async Task<decimal> GetProductPriceAsync(int productId)\n{\n    // fetches CURRENT price — not the price at order time\n    var cmd = new SqlCommand(\n        \"SELECT price FROM products WHERE id = @id\", conn);\n```\n\nThe price lookup queries the **live `products` table** with no timestamp or snapshot. If a product's price changes after an order is placed, every subsequent call to `CalculateTotalAsync` will return a different total, because it recalculates using whatever the price is *right now*.\n\n---\n\n## Summary Table\n\n| # | File | Line(s) | Symptom | Root Cause |\n|---|------|---------|---------|------------|\n| 1 | `OrderRepository.cs` | 28–29 | Quantity always 1 | `Quantity` excluded from the items blob on INSERT; never persisted |\n| 2 | `OrderRepository.cs` | 58–60 | Total changes over time | Price fetched from live `products` table, not snapshotted at order placement |\n\n---\n\n## Recommended Next Steps (no fixes, per instructions)\n\n1. **Quantity bug:** The schema and serialization strategy need to change — either store `productId:quantity` pairs in the blob, use a proper `order_items` child table, or serialize as JSON.\n2. **Price drift bug:** The price at the time of order placement needs to be captured and stored — either on an `order_items` row, as a snapshot column, or by recording `price_at_purchase` during `InsertOrderAsync`.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

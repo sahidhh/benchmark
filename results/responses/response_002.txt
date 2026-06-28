@@ -1,0 +1,250 @@
+============================================================
+ID:       BM-0045
+Model:    anthropic/claude-sonnet-4-6
+Provider: auto
+Profile:  profiles/investigation.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  16094ms
+Input:    1376 tokens
+Output:   706 tokens
+Cost:     0.014718
+Finish:   stop
+
+--- Response ---
+## Root Cause Analysis
+
+There are **two distinct bugs**, both originating in `OrderRepository.cs`.
+
+---
+
+### Bug 1 — Quantities Always Calculated as 1
+
+**File:** `OrderRepository.cs`
+**Lines:** 28–29 (INSERT) and 44–48 (SELECT reconstruction)
+
+**Evidence:**
+
+In `InsertOrderAsync`, the items blob is built as:
+```cs
+// Line 28-29
+var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));
+```
+
+Only `ProductId` values are serialized — `Quantity` is **never written to the database**. The column comment even confirms this: `// Items stored as comma-separated product IDs — quantities not persisted`.
+
+When the order is later read back in `GetOrderAsync`, the blob is deserialized as:
+```cs
+// Lines 44-48
+var items = itemsBlob.Split(',').Select(id => new OrderItem
+{
+    ProductId = int.Parse(id),
+    Quantity = 1,   // ← hardcoded; no quantity was stored to recover
+}).ToList();
+```
+
+Because quantity was never persisted, every `OrderItem` is reconstructed with `Quantity = 1` regardless of what the customer actually ordered.
+
+---
+
+### Bug 2 — Order Total Changes Over Time
+
+**File:** `OrderRepository.cs`
+**Lines:** 55–61
+
+**Evidence:**
+
+```cs
+public async Task<decimal> GetProductPriceAsync(int productId)
+{
+    // fetches CURRENT price — not the price at order time
+    var cmd = new SqlCommand(
+        "SELECT price FROM products WHERE id = @id", conn);
+```
+
+The price lookup queries the **live `products` table** with no timestamp or snapshot. If a product's price changes after an order is placed, every subsequent call to `CalculateTotalAsync` will return a different total, because it recalculates using whatever the price is *right now*.
+
+---
+
+## Summary Table
+
+| # | File | Line(s) | Symptom | Root Cause |
+|---|------|---------|---------|------------|
+| 1 | `OrderRepository.cs` | 28–29 | Quantity always 1 | `Quantity` excluded from the items blob on INSERT; never persisted |
+| 2 | `OrderRepository.cs` | 58–60 | Total changes over time | Price fetched from live `products` table, not snapshotted at order placement |
+
+---
+
+## Recommended Next Steps (no fixes, per instructions)
+
+1. **Quantity bug:** The schema and serialization strategy need to change — either store `productId:quantity` pairs in the blob, use a proper `order_items` child table, or serialize as JSON.
+2. **Price drift bug:** The price at the time of order placement needs to be captured and stored — either on an `order_items` row, as a snapshot column, or by recording `price_at_purchase` during `InsertOrderAsync`.
+
+============================================================
+ID:       BM-0046
+Model:    anthropic/claude-sonnet-4-6
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  9297ms
+Input:    1380 tokens
+Output:   241 tokens
+Cost:     0.007755
+Finish:   stop
+
+--- Response ---
+There are two distinct bugs, both originating in **OrderRepository.cs**.
+
+---
+
+1. **[HIGH] OrderRepository.cs, line 22** — Quantities are never persisted. The `itemsBlob` is built using only `ProductId`, discarding `Quantity` entirely. When the order is later reconstructed in `GetOrderAsync`, every item's `Quantity` is hardcoded to `1` (line 40) because the data was never stored. The fix must happen at the write side: the blob (or schema) needs to encode quantity alongside product ID.
+
+2. **[HIGH] OrderRepository.cs, line 55** — `GetProductPriceAsync` queries the `products` table for the **current** price, not the price at the time the order was placed. Since no historical price is captured at order placement, the total will silently change whenever a product's price is updated. The price must be snapshotted at order time (e.g., stored in the order items) and retrieved from that snapshot, not from the live `products` table.
+
+============================================================
+ID:       BM-0047
+Model:    google/gemini-2.5-flash
+Provider: auto
+Profile:  profiles/investigation.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  7640ms
+Input:    1257 tokens
+Output:   1256 tokens
+Cost:     None
+Finish:   stop
+
+--- Response ---
+The customer report describes two distinct issues:
+
+1.  **Order total changes over time:** This suggests that the price used for calculation is not fixed at the time of order placement but is retrieved dynamically, potentially reflecting current prices.
+2.  **Quantities are always calculated as 1:** This indicates that the quantity information is either not being stored correctly or is being incorrectly retrieved and defaulted to 1.
+
+Let's investigate the codebase to find the root cause for each.
+
+### Investigation
+
+**1. Order total changes over time:**
+
+*   **`OrderController.cs`**: The `GetTotal` endpoint calls `_orderService.CalculateTotalAsync(orderId)`.
+*   **`OrderService.cs`**: `CalculateTotalAsync` retrieves the `order` from `_repo.GetOrderAsync(orderId)`. It then iterates through `order.Items` and for each item, calls `_repo.GetProductPriceAsync(item.ProductId)`. The comment `// unit price fetched here — not stored on order at placement time` is a strong indicator.
+*   **`OrderRepository.cs`**: `GetProductPriceAsync(int productId)` executes a SQL query `SELECT price FROM products WHERE id = @id`. The comment `// fetches CURRENT price — not the price at order time` confirms the suspicion.
+
+**Finding for "Order total changes over time":**
+The system fetches the current product price from the `products` table when calculating the total, rather than using the price at the time the order was placed. If product prices change in the `products` table, the order total will change accordingly.
+
+**Exact file and line where the bug originates (for changing total):**
+`OrderRepository.cs`, line 60: `SELECT price FROM products WHERE id = @id`
+
+**2. Quantities are always calculated as 1:**
+
+*   **`OrderController.cs`**: `PlaceOrder` calls `_orderService.PlaceOrderAsync(request.UserId, request.Items)`.
+*   **`OrderService.cs`**: `PlaceOrderAsync` creates an `Order` object with the provided `items` and then calls `_repo.InsertOrderAsync(order)`.
+*   **`OrderRepository.cs`**:
+    *   `InsertOrderAsync(Order order)`: The line `var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));` serializes only the `ProductId` into a comma-separated string. The `Quantity` property of `OrderItem` is completely ignored and not persisted. The comment `// Items stored as comma-separated product IDs — quantities not persisted` explicitly states this.
+    *   `GetOrderAsync(int orderId)`: When reconstructing the `Order` object from the database, the line `var items = itemsBlob.Split(',').Select(id => new OrderItem { ProductId = int.Parse(id), Quantity = 1, }).ToList();` explicitly sets `Quantity = 1` for every item, as the original quantity was never stored.
+
+**Finding for "Quantities are always calculated as 1":**
+The `OrderRepository` only stores the `ProductId` for each item in an order, not the `Quantity`. When an order is retrieved, the `Quantity` is hardcoded to `1` during reconstruction, leading to incorrect total calculations.
+
+**Exact file and line where the bug originates (for quantities always 1):**
+`OrderRepository.cs`, line 20: `var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));` (This is where the quantity information is *lost* during persistence).
+And subsequently, `OrderRepository.cs`, line 45: `Quantity = 1,` (This is where the quantity is *incorrectly defaulted* during retrieval).
+
+### Summary of Findings and Recommended Next Steps
+
+**Findings:**
+
+1.  **Order total changes over time:** The `OrderRepository.GetProductPriceAsync` method fetches the current price of a product from the `products` table at the time of total calculation, rather than storing and using the price at the time the order was placed. This is evident in `OrderRepository.cs` line 60.
+2.  **Quantities are always calculated as 1:** The `OrderRepository.InsertOrderAsync` method only persists the `ProductId` of each item in an order, completely omitting the `Quantity`. When an order is retrieved by `OrderRepository.GetOrderAsync`, the `Quantity` for all items is hardcoded to `1` during object reconstruction. This originates in `OrderRepository.cs` line 20 (loss of data) and is manifested in `OrderRepository.cs` line 45 (incorrect default).
+
+**Recommended Next Steps (Do not implement):**
+
+To address these issues, the following areas would need to be considered for modification:
+
+*   **Database Schema:** The `orders` table schema likely needs to be updated to store item-specific details, including the `ProductId`, `Quantity`, and the `UnitPrice` at the time of order placement. This might involve a new `order_items` table linked to `orders`.
+*   **`OrderRepository.cs`:**
+    *   `InsertOrderAsync`: Needs to be updated to correctly persist the `Quantity` and `UnitPrice` for each `OrderItem`.
+    *   `GetOrderAsync`: Needs to be updated to retrieve the correct `Quantity` and `UnitPrice` for each `OrderItem` from the database.
+    *   `GetProductPriceAsync`: This method's usage in `CalculateTotalAsync` would need to be re-evaluated once unit prices are stored with the order.
+*   **`OrderService.cs`:** `CalculateTotalAsync` would then use the stored `UnitPrice` and `Quantity` from the retrieved `Order` object, rather than fetching current prices.
+
+============================================================
+ID:       BM-0048
+Model:    google/gemini-2.5-flash
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  3359ms
+Input:    1261 tokens
+Output:   262 tokens
+Cost:     None
+Finish:   stop
+
+--- Response ---
+1.  **[HIGH]** `OrderRepository.cs`, line 20: `// Items stored as comma-separated product IDs — quantities not persisted`
+    `OrderRepository.cs`, line 45: `// reconstructs items from blob — Quantity is lost, defaults to 1`
+    The `InsertOrderAsync` method in `OrderRepository` only persists `ProductId` for order items, completely discarding the `Quantity`. When `GetOrderAsync` retrieves the order, it reconstructs `OrderItem` objects with a hardcoded `Quantity = 1`. This is the root cause of quantities always being calculated as 1.
+
+2.  **[HIGH]** `OrderRepository.cs`, line 60: `// fetches CURRENT price — not the price at order time`
+    The `GetProductPriceAsync` method in `OrderRepository` fetches the current price of a product from the `products` table. The `CalculateTotalAsync` method in `OrderService` uses this method to determine the price of each item when calculating the total. This means the order total will change if product prices are updated in the `products` table after an order has been placed, leading to the "order total is wrong — it changes over time" bug.
+
+============================================================
+ID:       BM-0049
+Model:    deepseek/deepseek-r1
+Provider: auto
+Profile:  profiles/investigation.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  20610ms
+Input:    1111 tokens
+Output:   1500 tokens
+Cost:     0.010559835
+Finish:   length
+
+--- Response ---
+None
+
+============================================================
+ID:       BM-0050
+Model:    deepseek/deepseek-r1
+Provider: auto
+Profile:  profiles/baseline.md
+Task:     tasks/investigate.md
+Fixture:  fixtures/dotnet-investigation
+Latency:  182063ms
+Input:    1121 tokens
+Output:   5036 tokens
+Cost:     0.0133747
+Finish:   stop
+
+--- Response ---
+Based on the customer report and code analysis, two critical issues cause incorrect order totals:
+
+1. **[HIGH] OrderRepository.cs (line 19)**  
+   **Issue:** Storing order items as comma-separated product IDs discards quantity information (`var itemsBlob = string.Join(",", order.Items.Select(i => i.ProductId));`).  
+   **Effect:** During retrieval (line 36), quantities default to 1 since they aren't persisted.
+
+2. **[HIGH] OrderService.cs (line 34)**  
+   **Issue:** Total calculation uses current product prices via `GetProductPriceAsync` instead of prices at order time.  
+   **Effect:** Order totals change if product prices are updated after placement, and combined with the quantity bug, totals are calculated as `current_price * 1`.
+
+**Root cause summary:**  
+- **Quantities always 1:** Persistence logic in `OrderRepository.InsertOrderAsync` discards quantities (line 19).  
+- **Total changes over time:** Price lookup in `OrderService.CalculateTotalAsync` uses live prices (line 34).  
+
+Both issues must be fixed to resolve the reported bug.
+
+
+## Summary
+
+| ID       | Model                     | Provider | Task           | Profile        | Input | Output | Latency |     Cost | Finish |
+|----------|---------------------------|----------|----------------|----------------|------:|-------:|--------:|---------:|--------|
+| BM-0045  | anthropic/claude-sonnet-4-6 | auto     | investigate    | investigation  |  1376 |    706 |   16094 |  $0.0147 | stop |
+| BM-0046  | anthropic/claude-sonnet-4-6 | auto     | investigate    | baseline       |  1380 |    241 |    9297 |  $0.0078 | stop |
+| BM-0047  | google/gemini-2.5-flash   | auto     | investigate    | investigation  |  1257 |   1256 |    7640 |        - | stop |
+| BM-0048  | google/gemini-2.5-flash   | auto     | investigate    | baseline       |  1261 |    262 |    3359 |        - | stop |
+| BM-0049  | deepseek/deepseek-r1      | auto     | investigate    | investigation  |  1111 |   1500 |   20610 |  $0.0106 | length |
+| BM-0050  | deepseek/deepseek-r1      | auto     | investigate    | baseline       |  1121 |   5036 |  182063 |  $0.0134 | stop |

@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0050",
+  "timestamp": "2026-06-28T16:37:47.228886+00:00",
+  "model": "deepseek/deepseek-r1",
+  "provider": "auto",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1121,
+  "output_tokens": 5036,
+  "latency_ms": 182063,
+  "cost_usd": 0.0133747,
+  "finish_reason": "stop",
+  "response": "Based on the customer report and code analysis, two critical issues cause incorrect order totals:\n\n1. **[HIGH] OrderRepository.cs (line 19)**  \n   **Issue:** Storing order items as comma-separated product IDs discards quantity information (`var itemsBlob = string.Join(\",\", order.Items.Select(i => i.ProductId));`).  \n   **Effect:** During retrieval (line 36), quantities default to 1 since they aren't persisted.\n\n2. **[HIGH] OrderService.cs (line 34)**  \n   **Issue:** Total calculation uses current product prices via `GetProductPriceAsync` instead of prices at order time.  \n   **Effect:** Order totals change if product prices are updated after placement, and combined with the quantity bug, totals are calculated as `current_price * 1`.\n\n**Root cause summary:**  \n- **Quantities always 1:** Persistence logic in `OrderRepository.InsertOrderAsync` discards quantities (line 19).  \n- **Total changes over time:** Price lookup in `OrderService.CalculateTotalAsync` uses live prices (line 34).  \n\nBoth issues must be fixed to resolve the reported bug.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

@@ -1,11 +1,12 @@
-# T2 Benchmark — Review task type
-# Goal: validate whether claude-sonnet-4-6 is justified for code review tasks,
-#       and whether gemini-2.5-flash can match it (cheaper T2 candidate)
+# T2 Benchmark -- Review task type (updated 2026-06-28)
+# Status: Gemini hit LENGTH at 1500 tokens (BM-0053, reviewer profile) -- bump to 2500
+# DeepSeek-r1 ELIMINATED: reasoning tokens + slow (136s baseline) + LENGTH on profiled runs
+# Re-running Gemini reviewer profile with max_tokens=2500 to get a complete response
 #
-# Run: python benchmark.py --config config-t2-review.yaml
-#
-# After run: fill scoring columns in results/reports/results.csv
-# Evidence threshold: >= 3 clean stop finishes on the review-matched profile
+# Run (Gemini re-run with more headroom):
+#   python benchmark.py --config config-t2-review.yaml --model google/gemini-2.5-flash --max-tokens 2500
+# Full matrix:
+#   python benchmark.py --config config-t2-review.yaml
 
 openrouter:
   api_key: "${OPENROUTER_API_KEY}"
@@ -13,35 +14,13 @@ openrouter:
 
 run:
   model:
-    - "anthropic/claude-sonnet-4-6"       # T2 baseline (heuristic incumbent)
-    - "google/gemini-2.5-flash"            # candidate: cheaper, passes T3 — can it do T2?
-    - "deepseek/deepseek-r1"               # candidate: strong reasoning
+    - "anthropic/claude-sonnet-4-6"   # T2 incumbent (caught 10/10 issues)
+    - "google/gemini-2.5-flash"        # challenger (caught 6-7/10; reviewer profile was incomplete)
   profile:
-    - "profiles/reviewer.md"              # task-matched: review profile on review task
-    - "profiles/baseline.md"              # control
+    - "profiles/reviewer.md"           # task-matched
+    - "profiles/baseline.md"           # control
   task:
-    - "tasks/review.md"                   # MUST match profile for valid T2 evidence
-  fixture: "fixtures/dotnet-review"       # single-file with SQL injection + design bugs
+    - "tasks/review.md"
+  fixture: "fixtures/dotnet-review"
   temperature: 0
-  max_tokens: 1500
-
-# Scoring guide (fill manually after run):
-#
-# behavior_compliance: Did it review without implementing? Did it rank findings by severity?
-#   0 = implemented fixes, 1 = partial, 2 = review-only with ranking
-#
-# scope_discipline: Did it stay scoped to review? No unrequested refactoring?
-#   0 = drifted into implementation, 1 = minor drift, 2 = clean
-#
-# engineering_quality: Did it catch SQL injection in GetByEmail + UpdateRole?
-#   Did it catch silent rowcount failure in UpdateRole? Double-connection in DeactivateUser?
-#   0 = missed critical issues, 1 = caught some, 2 = caught all, 3 = caught all + prioritized
-#
-# cost_efficiency: quality relative to cost. Cheaper model with same catch rate wins.
-#
-# Known bugs in dotnet-review/UserService.cs (ground truth for scoring):
-#   CRITICAL: SQL injection in GetByEmail (string interpolation in query)
-#   CRITICAL: SQL injection in UpdateRole
-#   HIGH:     UpdateRole has no rowcount check -- silently succeeds on missing userId
-#   MEDIUM:   DeactivateUser opens second connection (GetUserById already opened one)
-#   LOW:      No parameterized queries anywhere (pattern, not just instances)
+  max_tokens: 2500                     # bumped from 1500 -- Gemini reviewer profile needs more room

@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0056",
+  "timestamp": "2026-06-28T16:44:07.478084+00:00",
+  "model": "deepseek/deepseek-r1",
+  "provider": "auto",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/review.md",
+  "fixture": "fixtures/dotnet-review",
+  "input_tokens": 1179,
+  "output_tokens": 3699,
+  "latency_ms": 136640,
+  "cost_usd": 0.0100728,
+  "finish_reason": "stop",
+  "response": "### Review Findings\n\n#### **AuthController.cs**\n1. **[HIGH]** `Login` method (line 22):  \n   **Issue:** Timing side-channel vulnerability allows email enumeration (early exit on invalid email).  \n   **Suggestion:** Use constant-time comparison for password checks regardless of email validity.\n\n2. **[HIGH]** `Login` method (line 25):  \n   **Issue:** Compares plain-text password (`req.Password`) against stored hash (`user.PasswordHash`), indicating plain-text storage or incorrect hashing.  \n   **Suggestion:** Hash `req.Password` before comparing with `user.PasswordHash` using a secure algorithm (e.g., bcrypt).\n\n3. **[HIGH]** `Refresh` method (line 37):  \n   **Issue:** Accepts any valid JWT as a refresh token without server-side validation, allowing token reuse or revocation bypass.  \n   **Suggestion:** Validate refresh tokens against a persistent store (e.g., database) and check token type.\n\n4. **[HIGH]** `ListAllUsers` method (line 64):  \n   **Issue:** Missing authorization, exposing sensitive user data to unauthenticated/non-admin users.  \n   **Suggestion:** Add `[Authorize(Roles = \"Admin\")]` attribute.\n\n5. **[MED]** `ResetPassword` method (line 52):  \n   **Issue:** Reset token is the user's ID (predictable), enabling account takeover via token guessing.  \n   **Suggestion:** Generate a cryptographically secure random token (e.g., using `RandomNumberGenerator`).\n\n---\n\n#### **UserService.cs**\n6. **[HIGH]** `GetByEmail`, `UpdateRole`, `DeactivateUser`, `GetUserById` methods:  \n   **Issue:** SQL injection via raw string concatenation (e.g., `$\"SELECT ... WHERE email = '{email}'\"`).  \n   **Suggestion:** Use parameterized queries (`SqlCommand.Parameters`).\n\n7. **[HIGH]** `GetByEmail` method:  \n   **Issue:** Returns `UserDto` without `PasswordHash`, causing `Login` to fail (missing field).  \n   **Suggestion:** Include `PasswordHash` in the `SELECT` query and `UserDto`.\n\n8. **[MED]** `UpdateRole` method (line 33):  \n   **Issue:** No row validation after `UPDATE`, silently failing for invalid `userId`.  \n   **Suggestion:** Check `ExecuteNonQuery` return value and handle missing users.\n\n9. **[MED]** `DeactivateUser` method (line 39):  \n   **Issue:** Opens redundant database connection (`GetUserById` uses a separate connection).  \n   **Suggestion:** Reuse the connection or combine operations in a single query.\n\n10. **[LOW]** `DeactivateUser` method (line 39):  \n    **Issue:** Potential race condition between `GetUserById` check and update.  \n    **Suggestion:** Perform update unconditionally and verify row count.\n\n11. **[LOW]** `GetByEmail` method:  \n    **Issue:** Synchronous DB calls (`ExecuteReader`) in async context (AuthController uses `GetByEmailAsync`).  \n    **Suggestion:** Implement `GetByEmailAsync` with `ExecuteReaderAsync`.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

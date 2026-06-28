@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0048",
+  "timestamp": "2026-06-28T16:34:24.529418+00:00",
+  "model": "google/gemini-2.5-flash",
+  "provider": "auto",
+  "profile": "profiles/baseline.md",
+  "task": "tasks/investigate.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "input_tokens": 1261,
+  "output_tokens": 262,
+  "latency_ms": 3359,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "1.  **[HIGH]** `OrderRepository.cs`, line 20: `// Items stored as comma-separated product IDs — quantities not persisted`\n    `OrderRepository.cs`, line 45: `// reconstructs items from blob — Quantity is lost, defaults to 1`\n    The `InsertOrderAsync` method in `OrderRepository` only persists `ProductId` for order items, completely discarding the `Quantity`. When `GetOrderAsync` retrieves the order, it reconstructs `OrderItem` objects with a hardcoded `Quantity = 1`. This is the root cause of quantities always being calculated as 1.\n\n2.  **[HIGH]** `OrderRepository.cs`, line 60: `// fetches CURRENT price — not the price at order time`\n    The `GetProductPriceAsync` method in `OrderRepository` fetches the current price of a product from the `products` table. The `CalculateTotalAsync` method in `OrderService` uses this method to determine the price of each item when calculating the total. This means the order total will change if product prices are updated in the `products` table after an order has been placed, leading to the \"order total is wrong — it changes over time\" bug.",
+  "behavior_compliance": "",
+  "scope_discipline": "",
+  "engineering_quality": "",
+  "cost_efficiency": "",
+  "notes": ""
+}
