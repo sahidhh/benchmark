@@ -1,5 +1,21 @@
-"""Benchmark Runner v0.3 — workflow benchmark for engineering profiles."""
+"""Benchmark Runner v0.4 — workflow benchmark for engineering profiles.
 
+CLI overrides (all optional — config.yaml used as base):
+  --model MODEL         Override model (or comma-separated list)
+  --profile PROFILE     Override profile path (or comma-separated list)
+  --task TASK           Override task path (or comma-separated list)
+  --fixture FIXTURE     Override fixture path
+  --provider PROVIDER   Pin OpenRouter provider (e.g. 'Fireworks', 'Together')
+  --config CONFIG       Use alternate config file (default: config.yaml)
+  --dry-run             Print matrix without running
+
+Examples:
+  python benchmark.py --model google/gemini-2.5-flash-lite --task tasks/investigate.md
+  python benchmark.py --provider Fireworks --config config-t2.yaml
+  python benchmark.py --model anthropic/claude-sonnet-4-6,anthropic/claude-opus-4-8 --dry-run
+"""
+
+import argparse
 import csv
 import json
 import os
@@ -18,15 +34,26 @@ RESULTS_CSV = BASE_DIR / "results" / "reports" / "results.csv"
 RESULTS_RESPONSES = BASE_DIR / "results" / "responses"
 
 CSV_FIELDS = [
-    "benchmark_id", "timestamp", "model", "profile", "task", "fixture",
+    "benchmark_id", "timestamp", "model", "provider", "profile", "task", "fixture",
     "input_tokens", "output_tokens", "latency_ms", "cost_usd", "finish_reason",
-    # manual scoring — fill after run
     "behavior_compliance", "scope_discipline", "engineering_quality", "cost_efficiency", "notes",
 ]
 
 
-def load_config() -> dict:
-    with open(BASE_DIR / "config.yaml") as f:
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Benchmark Runner v0.4")
+    p.add_argument("--model",    help="Model(s) comma-separated to override config")
+    p.add_argument("--profile",  help="Profile path(s) comma-separated")
+    p.add_argument("--task",     help="Task path(s) comma-separated")
+    p.add_argument("--fixture",  help="Fixture path")
+    p.add_argument("--provider", help="Pin OpenRouter provider (e.g. Fireworks, Together)")
+    p.add_argument("--config",   default="config.yaml", help="Config file")
+    p.add_argument("--dry-run",  action="store_true", help="Print matrix without executing")
+    return p.parse_args()
+
+
+def load_config(config_file: str = "config.yaml") -> dict:
+    with open(BASE_DIR / config_file) as f:
         cfg = yaml.safe_load(f)
     api_key = cfg["openrouter"]["api_key"]
     if api_key.startswith("${") and api_key.endswith("}"):
@@ -38,6 +65,22 @@ def load_config() -> dict:
     return cfg
 
 
+def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
+    """Merge CLI args into config, overriding config.yaml values."""
+    run = cfg.setdefault("run", {})
+    if args.model:
+        run["model"] = [m.strip() for m in args.model.split(",")]
+    if args.profile:
+        run["profile"] = [p.strip() for p in args.profile.split(",")]
+    if args.task:
+        run["task"] = [t.strip() for t in args.task.split(",")]
+    if args.fixture:
+        run["fixture"] = args.fixture
+    if args.provider:
+        cfg.setdefault("openrouter", {})["provider"] = args.provider
+    return cfg
+
+
 def load_file(path: str) -> str:
     p = BASE_DIR / path
     if not p.exists():
@@ -45,14 +88,13 @@ def load_file(path: str) -> str:
     return p.read_text(encoding="utf-8")
 
 
-def load_fixture(fixture_path: str) -> tuple[str, str]:
-    """Load fixture — file or directory. Returns (content_string, display_name)."""
+def load_fixture(fixture_path: str) -> tuple:
+    """Load fixture -- file or directory. Returns (content_string, display_name)."""
     p = BASE_DIR / fixture_path
     if not p.exists():
         sys.exit(f"Error: fixture not found: {p}")
     if p.is_file():
         return p.read_text(encoding="utf-8"), fixture_path
-    # directory: load all files, format as named blocks
     files = sorted(f for f in p.iterdir() if f.is_file())
     if not files:
         sys.exit(f"Error: fixture directory is empty: {p}")
@@ -64,9 +106,8 @@ def load_fixture(fixture_path: str) -> tuple[str, str]:
     return "\n\n".join(parts), fixture_path
 
 
-def build_prompt(profile: str, task: str, fixture_content: str, fixture_path: str) -> list[dict]:
+def build_prompt(profile: str, task: str, fixture_content: str, fixture_path: str) -> list:
     p = Path(fixture_path)
-    # for single file inject as code block; for dir content is already formatted
     if (BASE_DIR / fixture_path).is_file():
         ext = p.suffix.lstrip(".")
         code_block = f"```{ext}\n{fixture_content.strip()}\n```"
@@ -92,7 +133,7 @@ def next_response_file() -> Path:
     return RESULTS_RESPONSES / f"response_{n:03d}.txt"
 
 
-def call_openrouter(cfg: dict, model: str, messages: list[dict]) -> tuple[dict, int]:
+def call_openrouter(cfg: dict, model: str, messages: list) -> tuple:
     url = cfg["openrouter"]["base_url"].rstrip("/") + "/chat/completions"
     headers = {
         "Authorization": f"Bearer {cfg['openrouter']['api_key']}",
@@ -107,6 +148,12 @@ def call_openrouter(cfg: dict, model: str, messages: list[dict]) -> tuple[dict, 
     if "max_tokens" in run:
         payload["max_tokens"] = run["max_tokens"]
 
+    # Provider pinning -- prevents silent routing between providers at different
+    # quantization levels. Set via --provider flag or config openrouter.provider.
+    provider = cfg.get("openrouter", {}).get("provider")
+    if provider:
+        payload["provider"] = {"order": [provider], "allow_fallbacks": False}
+
     start = time.monotonic()
     resp = requests.post(url, headers=headers, json=payload, timeout=120)
     latency_ms = round((time.monotonic() - start) * 1000)
@@ -117,10 +164,7 @@ def call_openrouter(cfg: dict, model: str, messages: list[dict]) -> tuple[dict, 
     return resp.json(), latency_ms
 
 
-def extract_metrics(
-    data: dict, latency_ms: int, bm_id: str,
-    model: str, profile_path: str, task_path: str, fixture_path: str,
-) -> dict:
+def extract_metrics(data, latency_ms, bm_id, model, provider, profile_path, task_path, fixture_path):
     usage = data.get("usage", {})
     choice = data["choices"][0] if data.get("choices") else {}
     cost = usage.get("cost") or data.get("cost")
@@ -128,6 +172,7 @@ def extract_metrics(
         "benchmark_id": bm_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "model": model,
+        "provider": provider,
         "profile": profile_path,
         "task": task_path,
         "fixture": fixture_path,
@@ -137,7 +182,6 @@ def extract_metrics(
         "cost_usd": cost,
         "finish_reason": choice.get("finish_reason"),
         "response": choice.get("message", {}).get("content", ""),
-        # manual scoring — empty until human fills
         "behavior_compliance": "",
         "scope_discipline": "",
         "engineering_quality": "",
@@ -164,7 +208,9 @@ def append_csv(metrics: dict) -> None:
 
 
 def main():
-    cfg = load_config()
+    args = parse_args()
+    cfg = load_config(args.config)
+    cfg = apply_cli_overrides(cfg, args)
     run = cfg["run"]
 
     models = run["model"] if isinstance(run["model"], list) else [run["model"]]
@@ -173,11 +219,21 @@ def main():
     fixture_path = run["fixture"]
 
     fixture_content, fixture_display = load_fixture(fixture_path)
+    total = len(models) * len(task_paths) * len(profile_paths)
+
+    if args.dry_run:
+        provider_label = cfg.get("openrouter", {}).get("provider", "auto")
+        print(f"Dry run -- {total} runs [provider: {provider_label}]\n")
+        n = 0
+        for model in models:
+            for task_path in task_paths:
+                for profile_path in profile_paths:
+                    n += 1
+                    print(f"  [{n}/{total}] {model} | {Path(task_path).stem} | {Path(profile_path).stem}")
+        return
 
     results = []
-    log_lines = []  # accumulated verbose output saved to responses file
-
-    total = len(models) * len(task_paths) * len(profile_paths)
+    log_lines = []
     run_num = 0
 
     for model in models:
@@ -189,33 +245,38 @@ def main():
                 profile = load_file(profile_path)
                 messages = build_prompt(profile, task, fixture_content, fixture_path)
 
-                print(f"[{run_num}/{total}] {bm_id} | {model} | {Path(task_path).stem} | {Path(profile_path).stem} ...", end=" ", flush=True)
+                label = f"{Path(task_path).stem} | {Path(profile_path).stem}"
+                print(f"[{run_num}/{total}] {bm_id} | {model} | {label} ...", end=" ", flush=True)
 
                 data, latency_ms = call_openrouter(cfg, model, messages)
-                metrics = extract_metrics(data, latency_ms, bm_id, model, profile_path, task_path, fixture_path)
+                provider_used = cfg.get("openrouter", {}).get("provider", "auto")
+                metrics = extract_metrics(
+                    data, latency_ms, bm_id,
+                    model, provider_used, profile_path, task_path, fixture_path,
+                )
 
                 save_raw(metrics, bm_id)
                 append_csv(metrics)
-
                 print(f"{latency_ms}ms")
 
-                # accumulate verbose output for the responses file
                 log_lines.append("=" * 60)
-                log_lines.append(f"ID:      {bm_id}")
-                log_lines.append(f"Model:   {model}")
-                log_lines.append(f"Profile: {profile_path}")
-                log_lines.append(f"Task:    {task_path}")
-                log_lines.append(f"Fixture: {fixture_display}")
-                log_lines.append(f"Latency: {latency_ms}ms")
-                log_lines.append(f"Input tokens:  {metrics['input_tokens']}")
-                log_lines.append(f"Output tokens: {metrics['output_tokens']}")
-                log_lines.append(f"Cost:          {metrics['cost_usd']}")
-                log_lines.append(f"Finish reason: {metrics['finish_reason']}")
+                log_lines.append(f"ID:       {bm_id}")
+                log_lines.append(f"Model:    {model}")
+                log_lines.append(f"Provider: {provider_used}")
+                log_lines.append(f"Profile:  {profile_path}")
+                log_lines.append(f"Task:     {task_path}")
+                log_lines.append(f"Fixture:  {fixture_display}")
+                log_lines.append(f"Latency:  {latency_ms}ms")
+                log_lines.append(f"Input:    {metrics['input_tokens']} tokens")
+                log_lines.append(f"Output:   {metrics['output_tokens']} tokens")
+                log_lines.append(f"Cost:     {metrics['cost_usd']}")
+                log_lines.append(f"Finish:   {metrics['finish_reason']}")
                 log_lines.append(f"\n--- Response ---\n{metrics['response']}\n")
 
                 results.append({
                     "id": bm_id,
                     "model": model,
+                    "provider": provider_used,
                     "task": Path(task_path).stem,
                     "profile": Path(profile_path).stem,
                     "input": metrics["input_tokens"],
@@ -225,22 +286,22 @@ def main():
                     "finish_reason": metrics["finish_reason"],
                 })
 
-    # summary table (always, even single run)
-    summary_lines = []
-    summary_lines.append("\n## Summary\n")
-    summary_lines.append("| ID       | Model                          | Task                 | Profile              | Input | Output | Latency |     Cost | Finish  |")
-    summary_lines.append("|----------|--------------------------------|----------------------|----------------------|------:|-------:|--------:|---------:|---------|")
+    summary_lines = ["\n## Summary\n"]
+    hdr = "| ID       | Model                     | Provider | Task           | Profile        | Input | Output | Latency |     Cost | Finish |"
+    sep = "|----------|---------------------------|----------|----------------|----------------|------:|-------:|--------:|---------:|--------|"
+    summary_lines.extend([hdr, sep])
     for r in results:
         cost = f"${r['cost']:.4f}" if r["cost"] else "-"
-        summary_lines.append(
-            f"| {r['id']:<8} | {r['model']:<30} | {r['task']:<20} | {r['profile']:<20} "
-            f"| {r['input'] or '-':>5} | {r['output'] or '-':>6} | {r['latency_ms']:>7} | {cost:>8} | {r['finish_reason'] or '-'} |"
+        row = (
+            f"| {r['id']:<8} | {r['model']:<25} | {r['provider']:<8} | {r['task']:<14} | "
+            f"{r['profile']:<14} | {str(r['input'] or '-'):>5} | {str(r['output'] or '-'):>6} | "
+            f"{r['latency_ms']:>7} | {cost:>8} | {r['finish_reason'] or '-'} |"
         )
+        summary_lines.append(row)
 
     for line in summary_lines:
         print(line)
 
-    # save combined run output
     log_lines.extend(summary_lines)
     resp_file = next_response_file()
     resp_file.write_text("\n".join(log_lines), encoding="utf-8")

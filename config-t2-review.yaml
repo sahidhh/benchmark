@@ -1,0 +1,47 @@
+# T2 Benchmark — Review task type
+# Goal: validate whether claude-sonnet-4-6 is justified for code review tasks,
+#       and whether gemini-2.5-flash can match it (cheaper T2 candidate)
+#
+# Run: python benchmark.py --config config-t2-review.yaml
+#
+# After run: fill scoring columns in results/reports/results.csv
+# Evidence threshold: >= 3 clean stop finishes on the review-matched profile
+
+openrouter:
+  api_key: "${OPENROUTER_API_KEY}"
+  base_url: "https://openrouter.ai/api/v1"
+
+run:
+  model:
+    - "anthropic/claude-sonnet-4-6"       # T2 baseline (heuristic incumbent)
+    - "google/gemini-2.5-flash"            # candidate: cheaper, passes T3 — can it do T2?
+    - "deepseek/deepseek-r1"               # candidate: strong reasoning
+  profile:
+    - "profiles/reviewer.md"              # task-matched: review profile on review task
+    - "profiles/baseline.md"              # control
+  task:
+    - "tasks/review.md"                   # MUST match profile for valid T2 evidence
+  fixture: "fixtures/dotnet-review"       # single-file with SQL injection + design bugs
+  temperature: 0
+  max_tokens: 1500
+
+# Scoring guide (fill manually after run):
+#
+# behavior_compliance: Did it review without implementing? Did it rank findings by severity?
+#   0 = implemented fixes, 1 = partial, 2 = review-only with ranking
+#
+# scope_discipline: Did it stay scoped to review? No unrequested refactoring?
+#   0 = drifted into implementation, 1 = minor drift, 2 = clean
+#
+# engineering_quality: Did it catch SQL injection in GetByEmail + UpdateRole?
+#   Did it catch silent rowcount failure in UpdateRole? Double-connection in DeactivateUser?
+#   0 = missed critical issues, 1 = caught some, 2 = caught all, 3 = caught all + prioritized
+#
+# cost_efficiency: quality relative to cost. Cheaper model with same catch rate wins.
+#
+# Known bugs in dotnet-review/UserService.cs (ground truth for scoring):
+#   CRITICAL: SQL injection in GetByEmail (string interpolation in query)
+#   CRITICAL: SQL injection in UpdateRole
+#   HIGH:     UpdateRole has no rowcount check -- silently succeeds on missing userId
+#   MEDIUM:   DeactivateUser opens second connection (GetUserById already opened one)
+#   LOW:      No parameterized queries anywhere (pattern, not just instances)

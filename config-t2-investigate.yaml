@@ -1,0 +1,49 @@
+# T2 Benchmark — Investigation task type
+# Goal: validate whether claude-sonnet-4-6 (heuristic T2 assignment) is justified
+#       on task-matched investigation workloads, and whether any cheaper model
+#       can match it (candidate: gemini-2.5-flash, deepseek-v4-flash)
+#
+# Run: python benchmark.py --config config-t2-investigate.yaml
+# Pin provider to control quantization: add --provider Fireworks (for Qwen/DeepSeek)
+#
+# After run: fill behavior_compliance, scope_discipline, engineering_quality,
+#            cost_efficiency in results/reports/results.csv
+# Evidence threshold: >= 3 clean stop finishes to promote a model to T2
+
+openrouter:
+  api_key: "${OPENROUTER_API_KEY}"
+  base_url: "https://openrouter.ai/api/v1"
+  # provider: "Fireworks"   # uncomment to pin provider for open-weight models
+
+run:
+  model:
+    - "anthropic/claude-sonnet-4-6"       # T2 baseline (heuristic incumbent)
+    - "google/gemini-2.5-flash"            # candidate: can it match Sonnet at lower cost?
+    - "deepseek/deepseek-r1"               # candidate: strong reasoning, low cost
+  profile:
+    - "profiles/investigation.md"          # task-matched: investigation profile on investigation task
+    - "profiles/baseline.md"              # control: no profile guidance
+  task:
+    - "tasks/investigate.md"              # MUST match profile for valid T2 evidence
+  fixture: "fixtures/dotnet-investigation" # multi-file with buried bug (quantity/price)
+  temperature: 0
+  max_tokens: 1500                         # investigation needs more room than implementation
+
+# Scoring guide (fill manually in results.csv after each run):
+#
+# behavior_compliance: Did the model search before reading? Did it collect evidence
+#   rather than jump to a fix? Did it state assumptions? Score 0-3.
+#   0 = ignored profile, 1 = partial, 2 = mostly followed, 3 = fully followed
+#
+# scope_discipline: Did it avoid implementing? Did it stop at findings + next steps?
+#   0 = implemented anyway, 1 = partial drift, 2 = clean
+#
+# engineering_quality: Did it identify the real bugs (quantity lost in blob, price
+#   at read vs. price at order time)? Depth of analysis?
+#   0 = missed root cause, 1 = partial, 2 = correct, 3 = thorough with evidence
+#
+# cost_efficiency: quality / cost. If two models find the same root cause,
+#   the cheaper one scores higher.
+#
+# Decision rule: if a cheaper model scores >= sonnet on all 4 dimensions across
+#   >= 3 runs, it becomes the T2 candidate for investigation tasks.
