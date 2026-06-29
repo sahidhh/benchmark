@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0052",
+  "timestamp": "2026-06-26T13:29:51.841260+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0052",
+  "input_tokens": 1222,
+  "output_tokens": 157,
+  "latency_ms": 3016,
+  "cost_usd": 0.000185,
+  "finish_reason": "stop",
+  "response": "**UserService.cs**\n```cs\nusing System.Data.SqlClient;\nusing Api.Models;\n\nnamespace Api.Services;\n\npublic class UserService\n{\n    private readonly string _connStr;\n\n    public UserService(string connStr)\n    {\n        _connStr = connStr;\n    }\n\n    public async Task DeactivateAsync(int userId)\n    {\n        using var conn = new SqlConnection(_connStr);\n        await conn.OpenAsync();\n        var cmd = new SqlCommand(\n            \"UPDATE users SET active = 0 WHERE id = @userId\", conn);\n        cmd.Parameters.AddWithValue(\"@userId\", userId);\n        await cmd.ExecuteNonQueryAsync();\n    }\n}\n```",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

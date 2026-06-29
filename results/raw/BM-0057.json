@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0057",
+  "timestamp": "2026-06-26T13:30:40.382685+00:00",
+  "model": "deepseek/deepseek-v4-flash",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0057",
+  "input_tokens": 1079,
+  "output_tokens": 745,
+  "latency_ms": 9797,
+  "cost_usd": 0.0002177915,
+  "finish_reason": "stop",
+  "response": "```cs\n// Add to UserService.cs\npublic async Task DeactivateAsync(int userId)\n{\n    var user = await _userRepo.GetUserByIdAsync(userId);\n    if (user == null) throw new KeyNotFoundException($\"User {userId} not found\");\n    user.Active = false;\n    await _userRepo.UpdateUserAsync(user);\n}\n```",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

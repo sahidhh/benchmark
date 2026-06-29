@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0051",
+  "timestamp": "2026-06-26T13:29:48.732042+00:00",
+  "model": "google/gemini-2.5-flash-lite",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0051",
+  "input_tokens": 1286,
+  "output_tokens": 710,
+  "latency_ms": 3578,
+  "cost_usd": 0.0004126,
+  "finish_reason": "stop",
+  "response": "The `UserService` class is not provided, so I will assume it exists and has a `UserRepository` dependency. I will add the `DeactivateAsync` method to `UserService` and assume a `UserRepository` with an `UpdateUserAsync` method that can handle setting the `Active` flag.\n\n**UserService.cs**\n```cs\nusing Api.Models;\nusing Api.Repositories;\n\nnamespace Api.Services;\n\npublic class UserService\n{\n    private readonly UserRepository _userRepo;\n\n    public UserService(UserRepository userRepo)\n    {\n        _userRepo = userRepo;\n    }\n\n    public async Task DeactivateAsync(int userId)\n    {\n        var user = await _userRepo.GetUserByIdAsync(userId); // Assuming this method exists\n        if (user == null)\n        {\n            throw new KeyNotFoundException($\"User with ID {userId} not found.\");\n        }\n        user.Active = false;\n        await _userRepo.UpdateUserAsync(user); // Assuming this method exists\n    }\n\n    // Other UserService methods...\n}\n```\n\n**UserRepository.cs** (Assumed)\n```cs\nusing Api.Models;\n\nnamespace Api.Repositories;\n\npublic class UserRepository\n{\n    // ... other methods\n\n    public async Task<User?> GetUserByIdAsync(int userId)\n    {\n        // Implementation to fetch user by ID from the database\n        // For example:\n        // using var conn = new SqlConnection(_connStr);\n        // await conn.OpenAsync();\n        // var cmd = new SqlCommand(\"SELECT id, name, email, active FROM users WHERE id = @id\", conn);\n        // cmd.Parameters.AddWithValue(\"@id\", userId);\n        // using var reader = await cmd.ExecuteReaderAsync();\n        // if (!await reader.ReadAsync()) return null;\n        // return new User { Id = reader.GetInt32(0), Name = reader.GetString(1), Email = reader.GetString(2), Active = reader.GetBoolean(3) };\n        throw new NotImplementedException(); // Placeholder\n    }\n\n    public async Task UpdateUserAsync(User user)\n    {\n        // Implementation to update user in the database\n        // For example:\n        // using var conn = new SqlConnection(_connStr);\n        // await conn.OpenAsync();\n        // var cmd = new SqlCommand(\"UPDATE users SET name = @name, email = @email, active = @active WHERE id = @id\", conn);\n        // cmd.Parameters.AddWithValue(\"@id\", user.Id);\n        // cmd.Parameters.AddWithValue(\"@name\", user.Name);\n        // cmd.Parameters.AddWithValue(\"@email\", user.Email);\n        // cmd.Parameters.AddWithValue(\"@active\", user.Active);\n        // await cmd.ExecuteNonQueryAsync();\n        throw new NotImplementedException(); // Placeholder\n    }\n\n    // ... other methods\n}\n```\n\n**User.cs** (Assumed)\n```cs\nnamespace Api.Models;\n\npublic class User\n{\n    public int Id { get; set; }\n    public string Name { get; set; }\n    public string Email { get; set; }\n    public bool Active { get; set; }\n}\n```",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

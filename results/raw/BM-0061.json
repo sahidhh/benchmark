@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0061",
+  "timestamp": "2026-06-26T13:31:47.938495+00:00",
+  "model": "openai/gpt-oss-20b",
+  "profile": "profiles/distilled.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0061",
+  "input_tokens": 1183,
+  "output_tokens": 1200,
+  "latency_ms": 8125,
+  "cost_usd": 0.00019149,
+  "finish_reason": "length",
+  "response": null,
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

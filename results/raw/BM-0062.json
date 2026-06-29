@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0062",
+  "timestamp": "2026-06-26T13:31:56.297059+00:00",
+  "model": "openai/gpt-oss-20b",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0062",
+  "input_tokens": 1132,
+  "output_tokens": 770,
+  "latency_ms": 8281,
+  "cost_usd": 0.0002106,
+  "finish_reason": "stop",
+  "response": "**UserService.cs** (add the new method)\n\n```cs\nusing Api.Models;\nusing Api.Repositories;\n\nnamespace Api.Services;\n\npublic class UserService\n{\n    private readonly UserRepository _repo;\n\n    public UserService(UserRepository repo)\n    {\n        _repo = repo;\n    }\n\n    // Existing methods...\n\n    /// <summary>\n    /// Deactivates a user by setting the Active flag to false.\n    /// </summary>\n    /// <param name=\"userId\">The ID of the user to deactivate.</param>\n    /// <returns>A task representing the asynchronous operation.</returns>\n    /// <exception cref=\"KeyNotFoundException\">Thrown if the user does not exist.</exception>\n    public async Task DeactivateAsync(int userId)\n    {\n        // Retrieve the user first\n        var user = await _repo.GetUserAsync(userId);\n        if (user == null)\n        {\n            throw new KeyNotFoundException($\"User {userId} not found\");\n        }\n\n        // Mark as inactive\n        user.Active = false;\n\n        // Persist the change\n        await _repo.UpdateUserAsync(user);\n    }\n}\n```\n\n*No other files were modified.*",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

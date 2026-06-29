@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0047",
+  "timestamp": "2026-06-26T13:29:28.786449+00:00",
+  "model": "google/gemini-2.5-flash",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0047",
+  "input_tokens": 1224,
+  "output_tokens": 570,
+  "latency_ms": 4563,
+  "cost_usd": null,
+  "finish_reason": "stop",
+  "response": "```diff\n--- a/Api/Controllers/OrderController.cs\n+++ b/Api/Controllers/OrderController.cs\n@@ -1,5 +1,4 @@\n using Microsoft.AspNetCore.Mvc;\n using Api.Services;\n-using Api.Models;\n \n namespace Api.Controllers;\n \n--- a/Api/Repositories/OrderRepository.cs\n+++ b/Api/Repositories/OrderRepository.cs\n@@ -1,5 +1,4 @@\n using System.Data.SqlClient;\n using Api.Models;\n \n namespace Api.Repositories;\n@@ -70,3 +69,70 @@\n         var cmd = new SqlCommand(\n             \"SELECT price FROM products WHERE id = @id\", conn);\n         cmd.Parameters.AddWithValue(\"@id\", productId);\n         return (decimal)await cmd.ExecuteScalarAsync();\n     }\n+}\n```\n```diff\n--- a/Api/Repositories/UserRepository.cs\n+++ b/Api/Repositories/UserRepository.cs\n@@ -29,4 +29,14 @@\n         cmd.Parameters.AddWithValue(\"@id\", userId);\n         return (bool)await cmd.ExecuteScalarAsync();\n     }\n+\n+    public async Task UpdateUserActiveStatusAsync(int userId, bool isActive)\n+    {\n+        using var conn = new SqlConnection(_connStr);\n+        await conn.OpenAsync();\n+        var cmd = new SqlCommand(\n+            \"UPDATE users SET active = @active WHERE id = @id\", conn);\n+        cmd.Parameters.AddWithValue(\"@active\", isActive);\n+        cmd.Parameters.AddWithValue(\"@id\", userId);\n+        await cmd.ExecuteNonQueryAsync();\n+    }\n }\n```\n```diff\n--- a/Api/Services/OrderService.cs\n+++ b/Api/Services/OrderService.cs\n@@ -1,5 +1,4 @@\n using Api.Models;\n using Api.Repositories;\n \n namespace Api.Services;\n```\n```diff\n--- a/Api/Services/UserService.cs\n+++ b/Api/Services/UserService.cs\n@@ -1,4 +1,5 @@\n using Api.Repositories;\n+using Api.Models;\n \n namespace Api.Services;\n \n@@ -16,4 +17,9 @@\n     {\n         return await _repo.IsUserActiveAsync(userId);\n     }\n+\n+    public async Task DeactivateAsync(int userId)\n+    {\n+        await _repo.UpdateUserActiveStatusAsync(userId, false);\n+    }\n }\n```",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

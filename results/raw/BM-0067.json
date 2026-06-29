@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0067",
+  "timestamp": "2026-06-26T13:34:00.091823+00:00",
+  "model": "qwen/qwen3.5-flash-02-23",
+  "profile": "profiles/ultra.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0067",
+  "input_tokens": 1136,
+  "output_tokens": 17340,
+  "latency_ms": 41516,
+  "cost_usd": 0.00458224,
+  "finish_reason": "stop",
+  "response": "\n</think>\n\n**UserRepository.cs**\n```cs\nusing System.Data.SqlClient;\nusing Api.Models;\n\nnamespace Api.Repositories;\n\npublic class UserRepository\n{\n    private readonly string _connStr;\n\n    public UserRepository(string connStr)\n    {\n        _connStr = connStr;\n    }\n\n    public async Task<int> DeactivateUserAsync(int userId)\n    {\n        using var conn = new SqlConnection(_connStr);\n        await conn.OpenAsync();\n        var cmd = new SqlCommand(\n            \"UPDATE users SET active = @active WHERE id = @id\", conn);\n        cmd.Parameters.AddWithValue(\"@active\", false);\n        cmd.Parameters.AddWithValue(\"@id\", userId);\n        return await cmd.ExecuteNonQueryAsync();\n    }\n}\n```\n\n**UserService.cs**\n```cs\nusing Api.Repositories;\n\nnamespace Api.Services;\n\npublic class UserService\n{\n    private readonly UserRepository _repo;\n\n    public UserService(UserRepository repo)\n    {\n        _repo = repo;\n    }\n\n    public async Task DeactivateAsync(int userId)\n    {\n        var affected = await _repo.DeactivateUserAsync(userId);\n        if (affected == 0) throw new KeyNotFoundException($\"User {userId} not found\");\n    }\n}\n```",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}

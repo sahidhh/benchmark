@@ -1,0 +1,20 @@
+{
+  "benchmark_id": "BM-0063",
+  "timestamp": "2026-06-26T13:32:20.400700+00:00",
+  "model": "openai/gpt-oss-20b",
+  "profile": "profiles/investigation.md",
+  "task": "tasks/implement.md",
+  "fixture": "fixtures/dotnet-investigation",
+  "workspace_path": "C:\\Users\\SahidhullahAnsari\\Documents\\projects\\GitHub\\benchmark\\tmp\\BM-0063",
+  "input_tokens": 1149,
+  "output_tokens": 1200,
+  "latency_ms": 24031,
+  "cost_usd": 0.000440325,
+  "finish_reason": "length",
+  "response": "**UserService.cs** – add a `Deactivate",
+  "behavior_score": "",
+  "scope_score": "",
+  "engineering_score": "",
+  "cost_efficiency": "",
+  "notes": ""
+}
